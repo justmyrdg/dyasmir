@@ -1,0 +1,204 @@
+@import "tailwindcss";
+
+/*
+ * Look and feel modelled on the AWS Management Console (dark top bar, white rounded containers,
+ * orange pill primary buttons, blue links and selection), with Poppins as the typeface.
+ *
+ * The Tailwind palette names used across the templates are remapped to that palette here, so:
+ *   indigo  = blue (links, selection, progress, info)
+ *   emerald = success green      rose = error red
+ *   amber   = warning / orange   slate = neutral greys
+ *   sky     = info blue
+ */
+@theme {
+  --font-sans: "Poppins", ui-sans-serif, system-ui, "Segoe UI", Arial, sans-serif;
+
+  --color-squid: #232f3e; /* top bar */
+  --color-squid-light: #37475a;
+  --color-orange: #ff9900; /* primary action */
+  --color-orange-hover: #fa6f00;
+  --color-ink: #000716; /* body text */
+
+  --color-indigo-50: #f2f8fd;
+  --color-indigo-100: #d1f1ff;
+  --color-indigo-200: #b8e7ff;
+  --color-indigo-300: #7ac6f5;
+  --color-indigo-400: #539fe5;
+  --color-indigo-500: #0972d3;
+  --color-indigo-600: #0972d3;
+  --color-indigo-700: #065299;
+  --color-indigo-800: #033160;
+  --color-indigo-900: #00142b;
+
+  --color-sky-50: #f2f8fd;
+  --color-sky-200: #0972d3;
+  --color-sky-900: #000716;
+
+  --color-emerald-50: #f2fcf3;
+  --color-emerald-100: #dff6e1;
+  --color-emerald-200: #afe6b4;
+  --color-emerald-300: #6fcf7a;
+  --color-emerald-400: #2bb534;
+  --color-emerald-500: #037f0c;
+  --color-emerald-600: #037f0c;
+  --color-emerald-700: #037f0c;
+  --color-emerald-800: #1a520f;
+  --color-emerald-900: #1a520f;
+
+  --color-rose-50: #fff7f7;
+  --color-rose-100: #ffe7e7;
+  --color-rose-200: #ffbaba;
+  --color-rose-300: #ff8a8a;
+  --color-rose-400: #eb4a4a;
+  --color-rose-500: #d91515;
+  --color-rose-600: #d91515;
+  --color-rose-700: #c21313;
+  --color-rose-800: #a21b1b;
+  --color-rose-900: #700000;
+
+  --color-amber-50: #fffce9;
+  --color-amber-100: #fff3c4;
+  --color-amber-200: #ffe347;
+  --color-amber-400: #ff9900;
+  --color-amber-500: #ff9900;
+  --color-amber-600: #b25a00;
+  --color-amber-700: #8d6605;
+  --color-amber-800: #8d6605;
+  --color-amber-900: #6b4a00;
+
+  --color-slate-50: #fafafa;
+  --color-slate-100: #f4f4f4;
+  --color-slate-200: #e9ebed;
+  --color-slate-300: #c6c6cd;
+  --color-slate-400: #8c8c94;
+  --color-slate-500: #5f6b7a;
+  --color-slate-600: #414d5c;
+  --color-slate-700: #354150;
+  --color-slate-800: #232f3e;
+  --color-slate-900: #000716;
+
+  --shadow-container: 0 1px 1px 1px #e9ebed, 0 6px 36px rgba(0, 7, 22, 0.1);
+}
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+  }
+  body {
+    @apply bg-slate-100 text-ink;
+    font-family: var(--font-sans);
+  }
+  h1 {
+    letter-spacing: -0.01em;
+  }
+  a {
+    color: inherit;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-indigo-500);
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  /* Buttons: pill shaped. Primary = orange with dark text, normal = blue outline. */
+  .btn,
+  .btn-primary,
+  .btn-secondary,
+  .btn-danger,
+  .btn-ghost {
+    @apply inline-flex cursor-pointer items-center justify-center gap-2 rounded-full border-2 px-5 py-1.5 text-sm font-semibold
+      whitespace-nowrap transition-colors disabled:cursor-not-allowed;
+  }
+  .btn-primary {
+    @apply border-orange bg-orange text-ink hover:border-orange-hover hover:bg-orange-hover
+      disabled:border-slate-200 disabled:bg-slate-200 disabled:text-slate-400;
+  }
+  .btn-secondary {
+    @apply border-indigo-500 bg-white text-indigo-500 hover:border-indigo-800 hover:bg-indigo-50 hover:text-indigo-800
+      disabled:border-slate-300 disabled:bg-white disabled:text-slate-400;
+  }
+  .btn-danger {
+    @apply border-rose-600 bg-white text-rose-600 hover:bg-rose-50 disabled:border-slate-300 disabled:text-slate-400;
+  }
+  .btn-ghost {
+    @apply border-transparent bg-transparent px-3 text-indigo-500 hover:bg-indigo-50 hover:text-indigo-800 disabled:text-slate-400
+      disabled:hover:bg-transparent;
+  }
+  .btn-sm {
+    @apply px-3 py-0.5 text-xs;
+  }
+
+  .input {
+    @apply block w-full rounded-lg border-2 border-slate-400 bg-white px-3 py-1.5 text-sm text-ink
+      placeholder:text-slate-400 placeholder:italic focus:border-indigo-500 focus:outline-none
+      disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400;
+  }
+  .label {
+    @apply mb-1 block text-sm font-semibold text-slate-700;
+  }
+
+  /* Container */
+  .card {
+    @apply rounded-2xl bg-white shadow-container;
+  }
+
+  .badge {
+    @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold whitespace-nowrap;
+  }
+
+  /* Table */
+  .table {
+    @apply min-w-full text-sm;
+  }
+  .table th {
+    @apply border-b-2 border-slate-200 bg-white px-4 py-2.5 text-left text-sm font-bold whitespace-nowrap text-slate-600;
+  }
+  .table td {
+    @apply border-b border-slate-200 px-4 py-2.5 align-top;
+  }
+  .table tbody tr:hover td {
+    @apply bg-indigo-50/60;
+  }
+  .table tbody tr:last-child td {
+    @apply border-b-0;
+  }
+
+  /* Flash alerts */
+  .alert-error,
+  .alert-info,
+  .alert-success {
+    @apply relative rounded-xl border-2 py-3 pr-4 pl-11 text-sm text-ink;
+  }
+  .alert-error::before,
+  .alert-info::before,
+  .alert-success::before {
+    @apply absolute top-3 left-4 grid h-5 w-5 place-items-center rounded-full text-xs font-bold text-white;
+  }
+  .alert-error {
+    @apply border-rose-600 bg-rose-50;
+  }
+  .alert-error::before {
+    content: "!";
+    @apply bg-rose-600;
+  }
+  .alert-info {
+    @apply border-indigo-500 bg-indigo-50;
+  }
+  .alert-info::before {
+    content: "i";
+    @apply bg-indigo-500;
+  }
+  .alert-success {
+    @apply border-emerald-600 bg-emerald-50;
+  }
+  .alert-success::before {
+    content: "✓";
+    @apply bg-emerald-600;
+  }
+
+  /* Text link */
+  .link {
+    @apply font-semibold text-indigo-500 hover:text-indigo-800 hover:underline;
+  }
+}

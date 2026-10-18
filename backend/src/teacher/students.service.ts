@@ -1,0 +1,466 @@
+import { parse } from 'csv-parse/sync';
+import ExcelJS from 'exceljs';
+import { revokeAllForUser } from '../auth/auth.service';
+import { prisma, type Tx } from '../db';
+import { badRequest, conflict, notFound } from '../lib/http-error';
+import { hashPassword } from '../lib/passwords';
+import { SR_CODE_REGEX } from '../lib/sr-code';
+import type { CreateStudentDto, EnrollmentDto, UpdateStudentDto } from './teacher.dto';
+
+type Db = Tx | typeof prisma;
+
+interface Enrollment {
+  subjectId: number;
+  sectionId: number;
+}
+
+const studentSelect = {
+  id: true,
+  srCode: true,
+  name: true,
+  sectionId: true,
+  isActive: true,
+  createdAt: true,
+  lockedUntil: true,
+  section: { select: { name: true } },
+  enrollments: {
+    select: { subject: { select: { id: true, name: true } }, section: { select: { id: true, name: true } } },
+    orderBy: { subjectId: 'asc' as const },
+  },
+} as const;
+
+type StudentRow = {
+  id: number;
+  srCode: string | null;
+  name: string;
+  sectionId: number | null;
+  isActive: boolean;
+  createdAt: Date;
+  lockedUntil: Date | null;
+  section: { name: string } | null;
+  enrollments: { subject: { id: number; name: string }; section: { id: number; name: string } }[];
+};
+
+const view = (s: StudentRow) => ({
+  id: s.id,
+  srCode: s.srCode,
+  name: s.name,
+  /** The student's own (block) section. */
+  sectionId: s.sectionId,
+  section: s.section?.name ?? null,
+  /** Subjects taken, each with the section it is taken in (may differ for irregular students). */
+  subjects: s.enrollments.map((e) => ({ id: e.subject.id, name: e.subject.name, sectionId: e.section.id, section: e.section.name })),
+  isActive: s.isActive,
+  createdAt: s.createdAt,
+  lockedUntil: s.lockedUntil,
+});
+
+export async function listStudents(filter: { sectionId?: number; subjectId?: number; search?: string }) {
+  const search = filter.search?.trim();
+  const and = [];
+  // A section filter shows the section's own students plus anyone taking a subject with it.
+  if (filter.sectionId) and.push({ OR: [{ sectionId: filter.sectionId }, { enrollments: { some: { sectionId: filter.sectionId } } }] });
+  if (filter.subjectId) and.push({ enrollments: { some: { subjectId: filter.subjectId } } });
+  if (search) and.push({ OR: [{ srCode: { contains: search } }, { name: { contains: search, mode: 'insensitive' as const } }] });
+
+  const students = await prisma.user.findMany({
+    where: { role: 'student', AND: and },
+    orderBy: [{ section: { name: 'asc' } }, { name: 'asc' }],
+    select: studentSelect,
+  });
+  return students.map(view);
+}
+
+// ---------------------------------------------------------------------------
+// Enrollment helpers
+// ---------------------------------------------------------------------------
+
+/** "sectionId:subjectId" pairs that exist (each section offers these subjects). */
+async function offeringKeys(db: Db): Promise<Set<string>> {
+  return new Set((await db.sectionSubject.findMany()).map((o) => `${o.sectionId}:${o.subjectId}`));
+}
+
+async function subjectsOfSection(db: Db, sectionId: number): Promise<number[]> {
+  return (await db.sectionSubject.findMany({ where: { sectionId }, select: { subjectId: true } })).map((s) => s.subjectId);
+}
+
+function checkEnrollments(list: EnrollmentDto[], offered: Set<string>): Enrollment[] {
+  const seen = new Set<number>();
+  for (const e of list) {
+    if (seen.has(e.subjectId)) throw badRequest('A subject can be taken in only one section');
+    seen.add(e.subjectId);
+    if (!offered.has(`${e.sectionId}:${e.subjectId}`)) throw badRequest(`Section ${e.sectionId} does not offer subject ${e.subjectId}`);
+  }
+  return list.map((e) => ({ subjectId: e.subjectId, sectionId: e.sectionId }));
+}
+
+async function assertSection(sectionId: number) {
+  if (!(await prisma.section.findUnique({ where: { id: sectionId } }))) throw badRequest('Unknown section');
+}
+
+// ---------------------------------------------------------------------------
+// Create / update
+// ---------------------------------------------------------------------------
+
+export async function createStudent(dto: CreateStudentDto) {
+  await assertSection(dto.sectionId);
+  if (await prisma.user.findUnique({ where: { srCode: dto.srCode } })) throw conflict(`SR code ${dto.srCode} already exists`, 'DUPLICATE');
+  const enrollments =
+    dto.enrollments === undefined
+      ? (await subjectsOfSection(prisma, dto.sectionId)).map((subjectId) => ({ subjectId, sectionId: dto.sectionId }))
+      : checkEnrollments(dto.enrollments, await offeringKeys(prisma));
+  const student = await prisma.user.create({
+    data: {
+      role: 'student',
+      srCode: dto.srCode,
+      name: dto.name.trim(),
+      sectionId: dto.sectionId,
+      passwordHash: await hashPassword(dto.password),
+      enrollments: { create: enrollments },
+    },
+    select: studentSelect,
+  });
+  return view(student);
+}
+
+async function getStudentOr404(id: number) {
+  const s = await prisma.user.findUnique({
+    where: { id },
+    select: { id: true, role: true, sectionId: true, enrollments: { select: { subjectId: true, sectionId: true } } },
+  });
+  if (!s || s.role !== 'student') throw notFound('Student not found');
+  return s;
+}
+
+export async function updateStudent(id: number, dto: UpdateStudentDto) {
+  const current = await getStudentOr404(id);
+  if (dto.sectionId) await assertSection(dto.sectionId);
+
+  const student = await prisma.$transaction(async (tx) => {
+    await tx.user.update({
+      where: { id },
+      data: {
+        ...(dto.name !== undefined ? { name: dto.name.trim() } : {}),
+        ...(dto.sectionId !== undefined ? { sectionId: dto.sectionId } : {}),
+        ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
+      },
+    });
+
+    const offered = await offeringKeys(tx);
+    let target: Enrollment[] | null = null;
+    if (dto.enrollments !== undefined) {
+      target = checkEnrollments(dto.enrollments, offered);
+    } else if (dto.sectionId !== undefined && dto.sectionId !== current.sectionId) {
+      // Moving to another block: subjects taken with the old block move along; irregular ones stay.
+      target = current.enrollments.map((e) =>
+        e.sectionId === current.sectionId && offered.has(`${dto.sectionId}:${e.subjectId}`) ? { ...e, sectionId: dto.sectionId! } : e,
+      );
+    }
+    if (target) {
+      await tx.studentSubject.deleteMany({ where: { studentId: id } });
+      if (target.length) await tx.studentSubject.createMany({ data: target.map((e) => ({ studentId: id, ...e })) });
+    }
+    return tx.user.findUniqueOrThrow({ where: { id }, select: studentSelect });
+  });
+
+  if (dto.isActive === false) await revokeAllForUser(id);
+  return view(student);
+}
+
+export async function resetPassword(id: number, password: string) {
+  await getStudentOr404(id);
+  await prisma.user.update({
+    where: { id },
+    data: { passwordHash: await hashPassword(password), failedLoginCount: 0, lockedUntil: null },
+  });
+  await revokeAllForUser(id);
+}
+
+// ---------------------------------------------------------------------------
+// Import (CSV or the Excel template)
+// ---------------------------------------------------------------------------
+
+interface ImportRowError {
+  line: number;
+  srCode?: string;
+  error: string;
+}
+
+interface RawTable {
+  headers: string[];
+  rows: { line: number; values: string[] }[];
+}
+
+/** Header/name comparison: lower case, letters and digits only ("SR code" -> "srcode"). */
+const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+const NOT_TAKEN = new Set(['', '-', 'none', 'no', 'na', 'n/a', 'x']);
+
+/** "BCpET3101", "bcpet 3101", "Section BCpET3101" or just "3101". */
+function matchSection(value: string, sections: { id: number; name: string }[]): number | undefined {
+  const v = norm(value.replace(/^section\s*/i, ''));
+  if (!v) return undefined;
+  const exact = sections.find((s) => norm(s.name) === v);
+  if (exact) return exact.id;
+  const bySuffix = sections.filter((s) => norm(s.name).endsWith(v));
+  return bySuffix.length === 1 ? bySuffix[0].id : undefined;
+}
+
+/** A subject by full or partial name ("Database Design", "database", "CpET343"). */
+function matchSubject(value: string, subjects: { id: number; name: string }[]): number | undefined {
+  const v = norm(value);
+  if (!v) return undefined;
+  const exact = subjects.find((s) => norm(s.name) === v);
+  if (exact) return exact.id;
+  const partial = subjects.filter((s) => norm(s.name).includes(v));
+  return partial.length === 1 ? partial[0].id : undefined;
+}
+
+function readCsv(csv: string): RawTable {
+  let records: string[][];
+  try {
+    records = parse(csv.replace(/^﻿/, ''), { skip_empty_lines: true, trim: true, relax_column_count: true });
+  } catch (e) {
+    throw badRequest(`Could not read CSV: ${(e as Error).message}`);
+  }
+  if (records.length < 2) throw badRequest('The file has no student rows');
+  const [headers, ...rows] = records;
+  return { headers, rows: rows.map((values, i) => ({ line: i + 2, values })) };
+}
+
+async function readXlsx(base64: string): Promise<RawTable> {
+  const wb = new ExcelJS.Workbook();
+  try {
+    await wb.xlsx.load(Buffer.from(base64, 'base64') as unknown as ArrayBuffer);
+  } catch {
+    throw badRequest('Could not read the Excel file. Save it as .xlsx (Excel Workbook) and try again.');
+  }
+  const ws = wb.getWorksheet('Students') ?? wb.worksheets[0];
+  if (!ws) throw badRequest('The Excel file has no sheets');
+  const width = ws.getRow(1).cellCount;
+  const text = (row: ExcelJS.Row, c: number) => String(row.getCell(c).text ?? '').trim();
+  const headers = Array.from({ length: width }, (_, i) => text(ws.getRow(1), i + 1));
+  const rows: RawTable['rows'] = [];
+  for (let r = 2; r <= ws.rowCount; r++) {
+    const row = ws.getRow(r);
+    const values = headers.map((_, i) => text(row, i + 1));
+    if (values.some((v) => v !== '')) rows.push({ line: r, values });
+  }
+  if (rows.length === 0) throw badRequest('The Excel file has no student rows (fill in the "Students" sheet from row 2)');
+  return { headers, rows };
+}
+
+/**
+ * Columns (header row required, any order, case-insensitive):
+ *   SR code, Name, Password, and either
+ *   - one column per subject holding the section the student takes it in (blank = not taken), as in the Excel template, or
+ *   - Section [+ Subjects, separated by ";", blank = both].
+ * All-or-nothing: if any row is invalid nothing is created. SR codes that already exist are skipped.
+ */
+export async function importStudents(input: { csv?: string; xlsxBase64?: string }) {
+  if (!!input.csv === !!input.xlsxBase64) throw badRequest('Send either a CSV file or an Excel file');
+  const table = input.xlsxBase64 ? await readXlsx(input.xlsxBase64) : readCsv(input.csv!);
+  if (table.rows.length > 2000) throw badRequest('At most 2000 students per import');
+
+  const sections = await prisma.section.findMany({ orderBy: { name: 'asc' } });
+  const subjects = await prisma.subject.findMany({ orderBy: { name: 'asc' } });
+  const offered = await offeringKeys(prisma);
+
+  // Map header positions.
+  const col: Record<string, number> = {};
+  const subjectCols: { index: number; subjectId: number; name: string }[] = [];
+  table.headers.forEach((h, i) => {
+    const key = norm(h);
+    if (['srcode', 'name', 'section', 'password', 'subjects'].includes(key)) col[key] = i;
+    else {
+      const sid = matchSubject(h, subjects);
+      if (sid && !subjectCols.some((c) => c.subjectId === sid)) subjectCols.push({ index: i, subjectId: sid, name: subjects.find((s) => s.id === sid)!.name });
+    }
+  });
+  for (const required of ['srcode', 'name', 'password']) {
+    if (col[required] === undefined) {
+      throw badRequest(`Missing column "${required === 'srcode' ? 'SR code' : required}". Download the Excel template to see the expected columns.`);
+    }
+  }
+  if (!subjectCols.length && col.section === undefined) {
+    throw badRequest('Add a "Section" column, or one column per subject with the section the student takes it in.');
+  }
+
+  const cell = (values: string[], key: string) => (col[key] === undefined ? '' : (values[col[key]] ?? '').trim());
+  const existing = new Set(
+    (
+      await prisma.user.findMany({
+        where: { srCode: { in: table.rows.map((r) => cell(r.values, 'srcode')) } },
+        select: { srCode: true },
+      })
+    ).map((u) => u.srCode),
+  );
+
+  const errors: ImportRowError[] = [];
+  const skipped: string[] = [];
+  const seen = new Set<string>();
+  const toCreate: { srCode: string; name: string; sectionId: number; password: string; enrollments: Enrollment[] }[] = [];
+
+  for (const { line, values } of table.rows) {
+    const srCode = cell(values, 'srcode');
+    const name = cell(values, 'name');
+    const password = cell(values, 'password');
+    const fail = (error: string) => errors.push({ line, srCode, error });
+
+    if (!SR_CODE_REGEX.test(srCode)) { fail('SR code must look like 23-12345'); continue; }
+    if (seen.has(srCode)) { fail('Duplicate SR code in file'); continue; }
+    seen.add(srCode);
+    if (!name) { fail('Name is required'); continue; }
+    if (name.length > 150) { fail('Name is too long'); continue; }
+    if (password.length < 6 || password.length > 72) { fail('Password must be 6-72 characters'); continue; }
+
+    const sectionCell = cell(values, 'section');
+    let home = sectionCell ? matchSection(sectionCell, sections) : undefined;
+    if (sectionCell && !home) { fail(`Unknown section "${sectionCell}" (use ${sections.map((s) => s.name).join(', ')})`); continue; }
+
+    let enrollments: Enrollment[] = [];
+    let rowError: string | null = null;
+    if (subjectCols.length) {
+      for (const sc of subjectCols) {
+        const v = (values[sc.index] ?? '').trim();
+        if (NOT_TAKEN.has(v.toLowerCase())) continue;
+        const sectionId = matchSection(v, sections);
+        if (!sectionId) { rowError = `Unknown section "${v}" under ${sc.name}`; break; }
+        if (!offered.has(`${sectionId}:${sc.subjectId}`)) { rowError = `${sc.name} is not offered in that section`; break; }
+        enrollments.push({ subjectId: sc.subjectId, sectionId });
+      }
+      home ??= enrollments[0]?.sectionId;
+      if (!rowError && !home) rowError = 'Choose a section under at least one subject';
+    } else {
+      if (!home) { fail('Section is required'); continue; }
+      const tokens = cell(values, 'subjects').split(/[;|]/).map((t) => t.trim()).filter(Boolean);
+      const all = tokens.length === 0 || tokens.some((t) => ['both', 'all'].includes(t.toLowerCase()));
+      const ids: number[] = [];
+      if (all) ids.push(...subjects.filter((s) => offered.has(`${home}:${s.id}`)).map((s) => s.id));
+      else {
+        for (const t of tokens) {
+          const sid = matchSubject(t, subjects);
+          if (!sid) { rowError = `Unknown subject "${t}"`; break; }
+          if (!offered.has(`${home}:${sid}`)) { rowError = 'Subject not offered to that section'; break; }
+          if (!ids.includes(sid)) ids.push(sid);
+        }
+      }
+      enrollments = ids.map((subjectId) => ({ subjectId, sectionId: home! }));
+    }
+    if (rowError) { fail(rowError); continue; }
+    if (existing.has(srCode)) { skipped.push(srCode); continue; }
+    toCreate.push({ srCode, name, sectionId: home!, password, enrollments });
+  }
+
+  if (errors.length) throw badRequest(`${errors.length} row(s) have problems. Nothing was imported.`, errors);
+
+  const hashed = await Promise.all(toCreate.map(async (s) => ({ ...s, passwordHash: await hashPassword(s.password) })));
+  const created = await prisma.$transaction(
+    async (tx) => {
+      for (const s of hashed) {
+        await tx.user.create({
+          data: {
+            role: 'student',
+            srCode: s.srCode,
+            name: s.name,
+            sectionId: s.sectionId,
+            passwordHash: s.passwordHash,
+            enrollments: { create: s.enrollments },
+          },
+        });
+      }
+      return hashed.length;
+    },
+    { timeout: 120_000, maxWait: 10_000 },
+  );
+  return { created, skipped };
+}
+
+// ---------------------------------------------------------------------------
+// Excel template
+// ---------------------------------------------------------------------------
+
+const NAVY = 'FF232F3E';
+const ORANGE = 'FFFF9900';
+
+/** A ready-to-fill workbook: "Students" sheet with dropdowns, plus an "Instructions" sheet. */
+export async function studentsTemplate(): Promise<Buffer> {
+  const sections = await prisma.section.findMany({ orderBy: { name: 'asc' } });
+  const subjects = await prisma.subject.findMany({ orderBy: { name: 'asc' } });
+  const sectionList = `"${sections.map((s) => s.name).join(',')}"`;
+  const ROWS = 1000;
+
+  const wb = new ExcelJS.Workbook();
+  wb.creator = 'JASthinkAboutIT';
+  wb.created = new Date();
+
+  const ws = wb.addWorksheet('Students', { views: [{ state: 'frozen', ySplit: 1 }] });
+  ws.columns = [
+    { header: 'SR code', key: 'sr', width: 14, style: { numFmt: '@' } },
+    { header: 'Name', key: 'name', width: 34 },
+    { header: 'Password', key: 'password', width: 16, style: { numFmt: '@' } },
+    ...subjects.map((s, i) => ({ header: s.name, key: `subject${i}`, width: Math.max(18, s.name.length + 4) })),
+  ];
+  const header = ws.getRow(1);
+  header.height = 24;
+  header.eachCell((c) => {
+    c.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY } };
+    c.alignment = { vertical: 'middle' };
+    c.border = { bottom: { style: 'medium', color: { argb: ORANGE } } };
+  });
+  header.getCell(1).note = 'Format NN-NNNNN, e.g. 23-12345';
+  subjects.forEach((s, i) => {
+    header.getCell(4 + i).note = `Section the student takes ${s.name} in. Leave blank if they do not take it.`;
+  });
+
+  for (let r = 2; r <= ROWS + 1; r++) {
+    ws.getCell(r, 1).dataValidation = {
+      type: 'textLength', operator: 'equal', formulae: [8], allowBlank: true, showErrorMessage: true,
+      errorTitle: 'SR code', error: 'Use the format NN-NNNNN, for example 23-12345.',
+    };
+    ws.getCell(r, 3).dataValidation = {
+      type: 'textLength', operator: 'between', formulae: [6, 72], allowBlank: true, showErrorMessage: true,
+      errorTitle: 'Password', error: 'The password must be 6 to 72 characters.',
+    };
+    subjects.forEach((_, i) => {
+      ws.getCell(r, 4 + i).dataValidation = {
+        type: 'list', allowBlank: true, formulae: [sectionList], showErrorMessage: true,
+        errorTitle: 'Section', error: 'Pick a section from the list, or leave it blank if the student does not take this subject.',
+      };
+    });
+  }
+
+  // Instructions
+  const help = wb.addWorksheet('Instructions');
+  help.getColumn(1).width = 110;
+  const lines: [string, Partial<ExcelJS.Font>?][] = [
+    ['How to fill in the Students sheet', { bold: true, size: 14 }],
+    [''],
+    ['1. One row per student, starting on row 2. Do not change the header row.'],
+    ['2. SR code: format NN-NNNNN, for example 23-12345.'],
+    ['3. Password: the student\'s first password (6-72 characters). You can reset it later on the Students page.'],
+    [`4. Subject columns (${subjects.map((s) => s.name).join(', ')}): choose the section the student takes that subject in.`],
+    ['   Leave the cell blank if the student does not take that subject.'],
+    ['   Irregular students take one subject in one section and the other subject in another section: same row, same account.'],
+    ['5. The student\'s own section is the first section in their row.'],
+    ['6. Save as .xlsx and upload it on Students > Import. If any row has a problem nothing is imported and every problem is listed.'],
+    ['   SR codes that already exist are skipped (change their subjects on the Students page instead).'],
+    [''],
+    ['Examples', { bold: true, size: 12 }],
+  ];
+  lines.forEach(([t, font]) => {
+    const row = help.addRow([t]);
+    if (font) row.font = font;
+  });
+  const exHeader = help.addRow(['SR code | Name | Password | ' + subjects.map((s) => s.name).join(' | ')]);
+  exHeader.font = { bold: true };
+  const [s1, s2] = [sections[0]?.name ?? '', sections[1]?.name ?? sections[0]?.name ?? ''];
+  help.addRow([`23-12345 | Dela Cruz, Juan | juan2026 | ${subjects.map(() => s1).join(' | ')}      (takes every subject with ${s1})`]);
+  help.addRow([`23-12346 | Santos, Maria | maria2026 | ${s1}${subjects.length > 1 ? ' | ' : ''}${subjects.slice(1).map(() => '').join(' | ')}      (only the first subject)`]);
+  if (subjects.length > 1) {
+    help.addRow([`23-12347 | Rizal, Jose | jose2026 | ${s1} | ${s2}      (irregular: different section per subject, one account)`]);
+  }
+
+  return Buffer.from(await wb.xlsx.writeBuffer());
+}

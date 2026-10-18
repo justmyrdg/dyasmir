@@ -1,0 +1,46 @@
+# Local development: PostgreSQL + the API.
+#   docker compose up -d --build
+# Postgres is published on host port 5433 so it does not clash with a locally installed PostgreSQL on 5432.
+# The Angular app still runs on the host with `npm start` (it proxies /api to localhost:3000).
+
+services:
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dyasmir}
+      POSTGRES_DB: quiz_platform
+      TZ: UTC
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d quiz_platform"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-dyasmir}@db:5432/quiz_platform?schema=public
+      PORT: 3000
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:4200}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-dev-only-change-me-0123456789abcdef0123456789abcdef}
+      ACCESS_TOKEN_TTL_SECONDS: 900
+      REFRESH_TOKEN_TTL_DAYS: 7
+      LOGIN_MAX_FAILED_ATTEMPTS: 5
+      LOGIN_LOCK_MINUTES: 5
+      # Plain http on localhost: the refresh cookie must not be marked Secure.
+      NODE_ENV: development
+    ports:
+      - "3000:3000"
+
+volumes:
+  pgdata:

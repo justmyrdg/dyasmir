@@ -1,0 +1,244 @@
+// Quiz platform schema.
+// CHECK constraints and the "exactly one correct choice" trigger are not expressible
+// in Prisma schema language; they live in the SQL migrations (see prisma/migrations).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Section {
+  id              Int              @id @default(autoincrement())
+  name            String           @unique @db.VarChar(10)
+  users           User[]
+  sectionSubjects SectionSubject[]
+  assignments     Assignment[]
+  enrollments     StudentSubject[]
+
+  @@map("sections")
+}
+
+model Subject {
+  id              Int              @id @default(autoincrement())
+  name            String           @unique @db.VarChar(100)
+  sectionSubjects SectionSubject[]
+  quizzes         Quiz[]
+  enrollments     StudentSubject[]
+
+  @@map("subjects")
+}
+
+/// Which subjects a student takes, and in which section they take each one.
+/// Usually every subject is in the student's own section, but an irregular student can take
+/// Database Design with one section and Embedded Systems with another, using the same account.
+model StudentSubject {
+  studentId Int            @map("student_id")
+  subjectId Int            @map("subject_id")
+  sectionId Int            @map("section_id")
+  student   User           @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  subject   Subject        @relation(fields: [subjectId], references: [id], onDelete: Restrict)
+  section   Section        @relation(fields: [sectionId], references: [id], onDelete: Restrict)
+  /// The section must actually offer the subject.
+  offering  SectionSubject @relation(fields: [sectionId, subjectId], references: [sectionId, subjectId], onDelete: Restrict)
+
+  @@id([studentId, subjectId])
+  @@index([sectionId, subjectId])
+  @@index([subjectId])
+  @@map("student_subjects")
+}
+
+model SectionSubject {
+  sectionId   Int              @map("section_id")
+  subjectId   Int              @map("subject_id")
+  section     Section          @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  subject     Subject          @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  enrollments StudentSubject[]
+
+  @@id([sectionId, subjectId])
+  @@map("section_subjects")
+}
+
+model User {
+  id               Int              @id @default(autoincrement())
+  // Students: NN-NNNNN. Null for the teacher.
+  srCode           String?          @unique @map("sr_code") @db.VarChar(8)
+  // Teacher login. Null for students.
+  email            String?          @unique @db.VarChar(255)
+  name             String           @db.VarChar(150)
+  role             String           @db.VarChar(10)
+  sectionId        Int?             @map("section_id")
+  passwordHash     String           @map("password_hash")
+  isActive         Boolean          @default(true) @map("is_active")
+  failedLoginCount Int              @default(0) @map("failed_login_count")
+  lockedUntil      DateTime?        @map("locked_until") @db.Timestamptz(6)
+  createdAt        DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  section          Section?         @relation(fields: [sectionId], references: [id], onDelete: Restrict)
+  attempts         Attempt[]
+  refreshTokens    RefreshToken[]
+  enrollments      StudentSubject[]
+
+  @@index([sectionId])
+  @@map("users")
+}
+
+model RefreshToken {
+  id        Int       @id @default(autoincrement())
+  userId    Int       @map("user_id")
+  tokenHash String    @unique @map("token_hash") @db.Char(64)
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz(6)
+  revokedAt DateTime? @map("revoked_at") @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+model Quiz {
+  id                    Int          @id @default(autoincrement())
+  subjectId             Int          @map("subject_id")
+  title                 String       @db.VarChar(200)
+  timeLimitMinutes      Int          @map("time_limit_minutes")
+  shuffleQuestions      Boolean      @default(true) @map("shuffle_questions")
+  shuffleChoices        Boolean      @default(true) @map("shuffle_choices")
+  showResultsToStudents Boolean      @default(false) @map("show_results_to_students")
+  totalPoints           Int          @default(0) @map("total_points")
+  /// Exam security: block copy/paste/right-click, require full screen, record leaving the page and screenshot keys.
+  secureMode            Boolean      @default(true) @map("secure_mode")
+  /// Submit automatically after this many times leaving the exam (0 = only record).
+  maxViolations         Int          @default(5) @map("max_violations")
+  /// Each student gets this many questions, picked at random when they start (null = every question).
+  itemsPerStudent       Int?         @map("items_per_student")
+  createdAt             DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  subject               Subject      @relation(fields: [subjectId], references: [id], onDelete: Restrict)
+  questions             Question[]
+  assignments           Assignment[]
+
+  @@index([subjectId])
+  @@map("quizzes")
+}
+
+model Question {
+  id              Int              @id @default(autoincrement())
+  quizId          Int              @map("quiz_id")
+  type            String           @db.VarChar(20)
+  text            String
+  points          Int              @default(1)
+  position        Int
+  quiz            Quiz             @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  choices         Choice[]
+  acceptedAnswers AcceptedAnswer[]
+  attemptAnswers  AttemptAnswer[]
+
+  @@index([quizId])
+  @@map("questions")
+}
+
+model Choice {
+  id         Int      @id @default(autoincrement())
+  questionId Int      @map("question_id")
+  text       String
+  position   Int
+  isCorrect  Boolean  @default(false) @map("is_correct")
+  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@index([questionId])
+  @@map("choices")
+}
+
+model AcceptedAnswer {
+  id         Int      @id @default(autoincrement())
+  questionId Int      @map("question_id")
+  answerText String   @map("answer_text")
+  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@index([questionId])
+  @@map("accepted_answers")
+}
+
+model Assignment {
+  id        Int       @id @default(autoincrement())
+  quizId    Int       @map("quiz_id")
+  sectionId Int       @map("section_id")
+  startAt   DateTime  @map("start_at") @db.Timestamptz(6)
+  dueAt     DateTime  @map("due_at") @db.Timestamptz(6)
+  quiz      Quiz      @relation(fields: [quizId], references: [id], onDelete: Restrict)
+  section   Section   @relation(fields: [sectionId], references: [id], onDelete: Restrict)
+  attempts  Attempt[]
+
+  @@unique([quizId, sectionId])
+  @@index([sectionId])
+  @@map("assignments")
+}
+
+model Attempt {
+  id            Int             @id @default(autoincrement())
+  assignmentId  Int             @map("assignment_id")
+  studentId     Int             @map("student_id")
+  startedAt     DateTime        @default(now()) @map("started_at") @db.Timestamptz(6)
+  // JSON array of question ids, fixed at start.
+  questionOrder Json            @map("question_order") @db.JsonB
+  // JSON object { "<questionId>": [choiceId, ...] }, fixed at start.
+  choiceOrder   Json            @map("choice_order") @db.JsonB
+  currentIndex  Int             @default(0) @map("current_index")
+  status        String          @default("in_progress") @db.VarChar(12)
+  submittedAt   DateTime?       @map("submitted_at") @db.Timestamptz(6)
+  score         Int?
+  /// Set when the teacher reopens a submitted attempt: the new end time (overrides time limit and due time).
+  extendedUntil DateTime?       @map("extended_until") @db.Timestamptz(6)
+  /// When the teacher last reopened it; the leave-the-exam counter only counts events after this.
+  reopenedAt    DateTime?       @map("reopened_at") @db.Timestamptz(6)
+  assignment    Assignment      @relation(fields: [assignmentId], references: [id], onDelete: Restrict)
+  student       User            @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  answers       AttemptAnswer[]
+  events        AttemptEvent[]
+
+  @@unique([assignmentId, studentId])
+  @@index([studentId])
+  @@index([status])
+  @@map("attempts")
+}
+
+model AttemptAnswer {
+  attemptId       Int       @map("attempt_id")
+  questionId      Int       @map("question_id")
+  // Choice id (as text) for multiple choice, free text for identification.
+  answer          String
+  /// Final result: the teacher's decision if there is one, otherwise the auto-check.
+  isCorrect       Boolean?  @map("is_correct")
+  pointsAwarded   Int?      @map("points_awarded")
+  /// What the automatic check decided.
+  autoCorrect     Boolean?  @map("auto_correct")
+  /// Teacher re-check ("consideration"): true = full points, false = 0, null = use the auto-check.
+  overrideCorrect Boolean?  @map("override_correct")
+  overriddenAt    DateTime? @map("overridden_at") @db.Timestamptz(6)
+  updatedAt       DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+  attempt         Attempt   @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  question        Question  @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@id([attemptId, questionId])
+  @@map("attempt_answers")
+}
+
+/// Exam-security activity reported by the quiz screen (left the page, screenshot key, copy attempt, ...).
+/// occurred_at is the database time when the server received it.
+model AttemptEvent {
+  id         Int       @id @default(autoincrement())
+  attemptId  Int       @map("attempt_id")
+  type       String    @db.VarChar(20)
+  occurredAt DateTime  @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  clientTime DateTime? @map("client_time") @db.Timestamptz(6)
+  durationMs Int?      @map("duration_ms")
+  detail     String?   @db.VarChar(200)
+  /// Random id from the browser so a resent event (after a reconnect or page close) is stored once.
+  clientId   String?   @map("client_id") @db.VarChar(40)
+  attempt    Attempt   @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+
+  @@unique([attemptId, clientId])
+  @@index([attemptId, occurredAt])
+  @@map("attempt_events")
+}

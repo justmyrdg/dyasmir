@@ -72,6 +72,9 @@ model User {
   role             String           @db.VarChar(10)
   sectionId        Int?             @map("section_id")
   passwordHash     String           @map("password_hash")
+  /// Students only: the current password, encrypted with CREDENTIALS_KEY so the teacher can export it.
+  /// Null for accounts whose password was set before this existed.
+  passwordEncrypted String?         @map("password_encrypted")
   isActive         Boolean          @default(true) @map("is_active")
   failedLoginCount Int              @default(0) @map("failed_login_count")
   lockedUntil      DateTime?        @map("locked_until") @db.Timestamptz(6)

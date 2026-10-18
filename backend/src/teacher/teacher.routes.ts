@@ -86,14 +86,25 @@ teacherRouter.delete('/attempts/:id', async (req, res) => {
 });
 
 // ---- Students ----
+function studentFilter(query: Record<string, unknown>): students.StudentFilter {
+  return {
+    sectionId: optionalIntQuery(query.sectionId, 'sectionId'),
+    subjectId: optionalIntQuery(query.subjectId, 'subjectId'),
+    search: typeof query.search === 'string' ? query.search.slice(0, 100) : undefined,
+  };
+}
+
 teacherRouter.get('/students', async (req, res) => {
-  res.json(
-    await students.listStudents({
-      sectionId: optionalIntQuery(req.query.sectionId, 'sectionId'),
-      subjectId: optionalIntQuery(req.query.subjectId, 'subjectId'),
-      search: typeof req.query.search === 'string' ? req.query.search.slice(0, 100) : undefined,
-    }),
-  );
+  res.json(await students.listStudents(studentFilter(req.query)));
+});
+
+/** Accounts with their current passwords (CSV, same columns as the import template). */
+teacherRouter.get('/students/export', async (req, res) => {
+  const csv = await students.exportAccountsCsv(studentFilter(req.query));
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="JASthinkAboutIT-student-accounts-${new Date().toISOString().slice(0, 10)}.csv"`);
+  res.setHeader('Cache-Control', 'no-store');
+  res.send(csv);
 });
 
 teacherRouter.post('/students', body(CreateStudentDto), async (req, res) => {
@@ -115,9 +126,14 @@ teacherRouter.patch('/students/:id', body(UpdateStudentDto), async (req, res) =>
   res.json(await students.updateStudent(intParam(req.params.id), req.body));
 });
 
+/** Also emails the new password when the student has an email address: { accountEmail: { status } }. */
 teacherRouter.post('/students/:id/reset-password', body(ResetPasswordDto), async (req, res) => {
-  await students.resetPassword(intParam(req.params.id), req.body.password);
-  res.status(204).end();
+  res.json(await students.resetPassword(intParam(req.params.id), req.body.password));
+});
+
+/** Emails the student their SR code and current password: { status: 'sent', newPassword? }. */
+teacherRouter.post('/students/:id/send-account-email', async (req, res) => {
+  res.json(await students.emailAccount(intParam(req.params.id)));
 });
 
 // ---- Quizzes ----

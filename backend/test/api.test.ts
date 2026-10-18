@@ -1,4 +1,6 @@
+import { parse as parseCsv } from 'csv-parse/sync';
 import ExcelJS from 'exceljs';
+import { SMTPServer } from 'smtp-server';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app';
@@ -337,7 +339,7 @@ describe('teacher features', () => {
 
   it('resets passwords and deactivates students', async () => {
     const s = await prisma.user.findUniqueOrThrow({ where: { srCode: '23-10001' } });
-    await request(app).post(`/api/teacher/students/${s.id}/reset-password`).set(auth(teacherToken)).send({ password: 'newpass1' }).expect(204);
+    await request(app).post(`/api/teacher/students/${s.id}/reset-password`).set(auth(teacherToken)).send({ password: 'newpass1' }).expect(200);
     const t = await login({ srCode: '23-10001', password: 'newpass1' });
     expect(t.status).toBe(200);
 
@@ -560,8 +562,8 @@ describe('irregular students and the Excel template', () => {
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.load(res.body);
     const ws = wb.getWorksheet('Students')!;
-    expect((ws.getRow(1).values as string[]).filter(Boolean)).toEqual(['SR code', 'Name', 'Password', 'Database Design', 'Embedded Systems (CpET343)']);
-    expect(ws.getCell('D2').dataValidation.type).toBe('list');
+    expect((ws.getRow(1).values as string[]).filter(Boolean)).toEqual(['SR code', 'Name', 'Password', 'Email', 'Database Design', 'Embedded Systems (CpET343)']);
+    expect(ws.getCell('E2').dataValidation.type).toBe('list');
     expect(wb.getWorksheet('Instructions')).toBeTruthy();
   });
 
@@ -992,5 +994,194 @@ describe('a random pick of items per student', () => {
     expect(changed.status).toBe(409);
     expect(changed.body.code).toBe('QUIZ_LOCKED');
     expect((await put(quizId, started)).status).toBe(200);
+  });
+});
+
+describe('exporting student accounts', () => {
+  const exportText = async (query: string) => {
+    const res = await request(app).get(`/api/teacher/students/export?${query}`).set(auth(teacherToken));
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toContain('text/csv');
+    return res.text;
+  };
+  const exportRows = async (query: string) =>
+    parseCsv(((await exportText(query)) as string).replace(/^﻿/, ''), { columns: true }) as Record<string, string>[];
+  const row = (rows: Record<string, string>[], srCode: string) => rows.find((r) => r['SR code'] === srCode);
+
+  it('exports SR codes, current passwords and the section each subject is taken in', async () => {
+    const created = await request(app)
+      .post('/api/teacher/students')
+      .set(auth(teacherToken))
+      .send({
+        srCode: '23-50001',
+        name: 'Export One',
+        sectionId: sectionA,
+        password: 'first-pass1',
+        enrollments: [{ subjectId, sectionId: sectionA }, { subjectId: embeddedId, sectionId: sectionB }],
+      });
+    expect(created.status).toBe(201);
+    expect(row(await exportRows('search=23-5000'), '23-50001')).toEqual({
+      'SR code': '23-50001',
+      Name: 'Export One',
+      Password: 'first-pass1',
+      Email: '',
+      'Database Design': 'BCpET3101',
+      'Embedded Systems (CpET343)': 'BCpET3102',
+    });
+    // Readable for the export, but not stored as plain text.
+    const stored = (await prisma.user.findUniqueOrThrow({ where: { srCode: '23-50001' } })).passwordEncrypted;
+    expect(stored).toBeTruthy();
+    expect(stored).not.toContain('first-pass1');
+
+    await request(app).post(`/api/teacher/students/${created.body.id}/reset-password`).set(auth(teacherToken)).send({ password: 'second-pass2' });
+    await request(app)
+      .post('/api/teacher/students/import')
+      .set(auth(teacherToken))
+      .send({ csv: 'SR code,Name,Password,Database Design\n23-50002,Export Two,third-pass3,BCpET3102\n' })
+      .expect(200);
+    // Added before passwords were kept readable: nothing to export until the teacher resets it.
+    await prisma.user.create({ data: { role: 'student', srCode: '23-50003', name: 'Export Old', sectionId: sectionA, passwordHash: await hashPassword(PW) } });
+
+    const rows = await exportRows('search=23-5000');
+    expect(row(rows, '23-50001')!.Password).toBe('second-pass2');
+    expect(row(rows, '23-50002')).toMatchObject({ Password: 'third-pass3', 'Database Design': 'BCpET3102', 'Embedded Systems (CpET343)': '' });
+    expect(row(rows, '23-50003')!.Password).toBe('');
+    expect(rows.find((r) => !r['SR code'].startsWith('23-5000'))).toBeUndefined();
+  });
+
+  it('an exported file can be imported again, for example on another server', async () => {
+    const csv = (await exportText('search=23-50001')).replace('23-50001', '23-50009');
+    const imp = await request(app).post('/api/teacher/students/import').set(auth(teacherToken)).send({ csv });
+    expect(imp.body).toMatchObject({ created: 1 });
+    expect((await login({ srCode: '23-50009', password: 'second-pass2' })).status).toBe(200);
+    const copy = await prisma.user.findUniqueOrThrow({
+      where: { srCode: '23-50009' },
+      include: { enrollments: { include: { section: true }, orderBy: { subjectId: 'asc' } } },
+    });
+    expect(copy.enrollments.map((e) => `${e.subjectId}@${e.section.name}`)).toEqual([`${subjectId}@BCpET3101`, `${embeddedId}@BCpET3102`]);
+  });
+});
+
+describe('account emails', () => {
+  /** Messages the test SMTP server received; addresses starting with "bounce" are refused. */
+  const inbox: { to: string[]; text: string }[] = [];
+  let smtp: SMTPServer;
+  const mailTo = (address: string) => inbox.filter((m) => m.to.includes(address));
+  const lastMailTo = (address: string) => mailTo(address).at(-1)!;
+  const passwordIn = (mail: { text: string }) => /Password: (\S+)/.exec(mail.text)?.[1];
+  const addStudent = (body: Record<string, unknown>) =>
+    request(app).post('/api/teacher/students').set(auth(teacherToken)).send({ sectionId: sectionA, password: 'mail-pass0', ...body });
+  const importCsv = (csv: string) => request(app).post('/api/teacher/students/import').set(auth(teacherToken)).send({ csv });
+  const idOf = async (srCode: string) => (await prisma.user.findUniqueOrThrow({ where: { srCode } })).id;
+
+  beforeAll(async () => {
+    smtp = new SMTPServer({
+      authOptional: true,
+      disabledCommands: ['STARTTLS'],
+      logger: false,
+      onRcptTo(address, _session, cb) {
+        if (address.address.startsWith('bounce')) return cb(Object.assign(new Error('No such mailbox'), { responseCode: 550 }));
+        cb();
+      },
+      onData(stream, session, cb) {
+        let raw = '';
+        stream.on('data', (c: Buffer) => (raw += c.toString()));
+        stream.on('end', () => {
+          // Undo quoted-printable soft line breaks so the text can be searched.
+          inbox.push({ to: session.envelope.rcptTo.map((r) => r.address), text: raw.replace(/=\r?\n/g, '') });
+          cb();
+        });
+      },
+    });
+    await new Promise<void>((resolve) => smtp.listen(Number(process.env.SMTP_PORT), '127.0.0.1', resolve));
+  });
+  afterAll(() => new Promise<void>((resolve) => smtp.close(() => resolve())));
+
+  it('adding a student with an email sends their SR code, password, subjects and the sign-in link', async () => {
+    const res = await addStudent({
+      srCode: '23-60001',
+      name: 'Mail One',
+      password: 'mail-pass1',
+      email: 'Mail.One@Example.com',
+      enrollments: [{ subjectId, sectionId: sectionA }, { subjectId: embeddedId, sectionId: sectionB }],
+    });
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({ email: 'mail.one@example.com', accountEmail: { status: 'sent' } });
+    const mail = lastMailTo('mail.one@example.com');
+    expect(mail.text).toContain('23-60001');
+    expect(passwordIn(mail)).toBe('mail-pass1');
+    expect(mail.text).toContain('Database Design (BCpET3101)');
+    expect(mail.text).toContain('Embedded Systems (CpET343) (BCpET3102)');
+    expect(mail.text).toContain('https://quiz.test.local/login');
+
+    const none = await addStudent({ srCode: '23-60006', name: 'Mail Nobody' });
+    expect(none.body.accountEmail).toEqual({ status: 'no_email' });
+  });
+
+  it('a bulk import emails each new student; a failed email is reported and the student is still added', async () => {
+    const res = await importCsv(
+      'SR code,Name,Password,Email,Database Design\n' +
+        '23-60002,Mail Two,mail-pass2,mail.two@example.com,BCpET3101\n' +
+        '23-60003,Mail Bounce,mail-pass3,bounce@example.com,BCpET3101\n' +
+        '23-60004,Mail None,mail-pass4,,BCpET3101\n',
+    );
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ created: 3, emails: { sent: 1, withoutEmail: 1, failed: [{ srCode: '23-60003' }] } });
+    expect(res.body.emails.failed[0].error).toBeTruthy();
+    expect(passwordIn(lastMailTo('mail.two@example.com'))).toBe('mail-pass2');
+    expect(mailTo('bounce@example.com')).toHaveLength(0);
+    expect((await login({ srCode: '23-60003', password: 'mail-pass3' })).status).toBe(200);
+  });
+
+  it('refuses an email address that is malformed or already used by another student', async () => {
+    expect((await addStudent({ srCode: '23-60010', name: 'Taken', email: 'mail.two@example.com' })).status).toBe(409);
+    expect((await addStudent({ srCode: '23-60011', name: 'Malformed', email: 'not-an-email' })).status).toBe(400);
+    const bad = await importCsv(
+      'SR code,Name,Password,Email,Database Design\n' +
+        '23-60012,In Use,mail-pass5,MAIL.TWO@example.com,BCpET3101\n' +
+        '23-60013,Twice A,mail-pass5,twice@example.com,BCpET3101\n' +
+        '23-60014,Twice B,mail-pass5,twice@example.com,BCpET3101\n' +
+        '23-60015,Malformed,mail-pass5,nope,BCpET3101\n',
+    );
+    expect(bad.status).toBe(400);
+    expect(bad.body.details.map((d: { line: number }) => d.line)).toEqual([2, 4, 5]);
+    expect(await prisma.user.count({ where: { srCode: { in: ['23-60012', '23-60013'] } } })).toBe(0);
+  });
+
+  it('reset password emails the new one; Send account email sends the current one', async () => {
+    const id = await idOf('23-60001');
+    const reset = await request(app).post(`/api/teacher/students/${id}/reset-password`).set(auth(teacherToken)).send({ password: 'mail-pass9' });
+    expect(reset.body).toEqual({ accountEmail: { status: 'sent' } });
+    expect(passwordIn(lastMailTo('mail.one@example.com'))).toBe('mail-pass9');
+
+    const before = mailTo('mail.one@example.com').length;
+    const send = await request(app).post(`/api/teacher/students/${id}/send-account-email`).set(auth(teacherToken));
+    expect(send.body).toEqual({ status: 'sent' });
+    expect(mailTo('mail.one@example.com')).toHaveLength(before + 1);
+    expect(passwordIn(lastMailTo('mail.one@example.com'))).toBe('mail-pass9');
+    expect((await login({ srCode: '23-60001', password: 'mail-pass9' })).status).toBe(200);
+
+    const noEmail = await request(app).post(`/api/teacher/students/${await idOf('23-60004')}/send-account-email`).set(auth(teacherToken));
+    expect(noEmail.status).toBe(400);
+  });
+
+  it('an account from before passwords were kept gets a new password by email', async () => {
+    await prisma.user.create({
+      data: { role: 'student', srCode: '23-60005', name: 'Mail Old', email: 'mail.old@example.com', sectionId: sectionA, passwordHash: await hashPassword(PW) },
+    });
+    const send = await request(app).post(`/api/teacher/students/${await idOf('23-60005')}/send-account-email`).set(auth(teacherToken));
+    expect(send.body).toEqual({ status: 'sent', newPassword: true });
+    const password = passwordIn(lastMailTo('mail.old@example.com'))!;
+    expect(password.length).toBeGreaterThanOrEqual(8);
+    expect((await login({ srCode: '23-60005', password })).status).toBe(200);
+    expect((await login({ srCode: '23-60005', password: PW })).status).toBe(401);
+  });
+
+  it('the teacher can add, change or remove a student email', async () => {
+    const id = await idOf('23-60004');
+    const patch = (email: string | null) => request(app).patch(`/api/teacher/students/${id}`).set(auth(teacherToken)).send({ email });
+    expect((await patch('Mail.Four@Example.com')).body.email).toBe('mail.four@example.com');
+    expect((await patch('mail.two@example.com')).status).toBe(409);
+    expect((await patch(null)).body.email).toBeNull();
   });
 });

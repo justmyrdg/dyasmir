@@ -100,6 +100,8 @@ export interface Student {
   id: number;
   srCode: string;
   name: string;
+  /** Where account emails go (optional). */
+  email: string | null;
   sectionId: number;
   section: string;
   /** Subjects this student takes, each with the section it is taken in (irregular students differ per subject). */
@@ -107,6 +109,20 @@ export interface Student {
   isActive: boolean;
   createdAt: string;
   lockedUntil: string | null;
+}
+
+/** What happened to the account email (SR code + password) after adding a student or resetting a password. */
+export type AccountEmailStatus =
+  | { status: 'sent'; newPassword?: true }
+  | { status: 'failed'; error: string }
+  | { status: 'no_email' }
+  | { status: 'not_configured' };
+
+export interface AccountEmailSummary {
+  sent: number;
+  withoutEmail: number;
+  failed: { srCode: string; error: string }[];
+  notConfigured: boolean;
 }
 
 export interface QuizSummary {

@@ -3,6 +3,7 @@ import ExcelJS from 'exceljs';
 import { autoSubmitExpired, DEADLINE_SQL, gradeAttempt, TOTAL_POINTS_SQL } from '../attempts/grading';
 import { COUNTED_EVENT_TYPES } from '../attempts/security';
 import { prisma } from '../db';
+import { safeCell, toCsv } from '../lib/csv';
 import { badRequest, conflict, notFound } from '../lib/http-error';
 
 export const MANILA_TZ = 'Asia/Manila';
@@ -226,11 +227,6 @@ export async function results(filter: ResultsFilter): Promise<ResultRow[]> {
 
 const STATUS_LABEL = { not_started: 'Not started', in_progress: 'In progress', submitted: 'Submitted' } as const;
 
-/** Stops spreadsheet apps from evaluating cell text as a formula. */
-function safeCell(v: string): string {
-  return /^[=+\-@\t\r]/.test(v) ? `'${v}` : v;
-}
-
 function exportRows(rows: ResultRow[]) {
   return rows.map((r) => ({
     srCode: r.srCode,
@@ -262,13 +258,10 @@ const HEADERS: [keyof ReturnType<typeof exportRows>[number], string][] = [
 ];
 
 export function resultsCsv(rows: ResultRow[]): string {
-  const esc = (v: unknown) => {
-    const s = v === null || v === undefined ? '' : safeCell(String(v));
-    return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-  };
-  const lines = [HEADERS.map(([, h]) => h).join(',')];
-  for (const r of exportRows(rows)) lines.push(HEADERS.map(([k]) => esc(r[k])).join(','));
-  return '﻿' + lines.join('\r\n') + '\r\n';
+  return toCsv([
+    HEADERS.map(([, h]) => h),
+    ...exportRows(rows).map((r) => HEADERS.map(([k]) => (r[k] === null || r[k] === undefined ? null : safeCell(String(r[k]))))),
+  ]);
 }
 
 export async function resultsXlsx(rows: ResultRow[]): Promise<Buffer> {

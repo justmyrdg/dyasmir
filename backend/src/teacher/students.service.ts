@@ -1,10 +1,14 @@
+import { isEmail } from 'class-validator';
 import { parse } from 'csv-parse/sync';
 import ExcelJS from 'exceljs';
 import { revokeAllForUser } from '../auth/auth.service';
 import { prisma, type Tx } from '../db';
-import { badRequest, conflict, notFound } from '../lib/http-error';
+import { decryptPassword, encryptPassword } from '../lib/credentials';
+import { safeCell, toCsv } from '../lib/csv';
+import { badRequest, conflict, HttpError, notFound } from '../lib/http-error';
 import { hashPassword } from '../lib/passwords';
 import { SR_CODE_REGEX } from '../lib/sr-code';
+import { sendAccountEmail, sendAccountEmails } from './account-email';
 import type { CreateStudentDto, EnrollmentDto, UpdateStudentDto } from './teacher.dto';
 
 type Db = Tx | typeof prisma;
@@ -18,6 +22,7 @@ const studentSelect = {
   id: true,
   srCode: true,
   name: true,
+  email: true,
   sectionId: true,
   isActive: true,
   createdAt: true,
@@ -33,6 +38,7 @@ type StudentRow = {
   id: number;
   srCode: string | null;
   name: string;
+  email: string | null;
   sectionId: number | null;
   isActive: boolean;
   createdAt: Date;
@@ -45,6 +51,8 @@ const view = (s: StudentRow) => ({
   id: s.id,
   srCode: s.srCode,
   name: s.name,
+  /** Where account emails go (optional). */
+  email: s.email,
   /** The student's own (block) section. */
   sectionId: s.sectionId,
   section: s.section?.name ?? null,
@@ -55,20 +63,59 @@ const view = (s: StudentRow) => ({
   lockedUntil: s.lockedUntil,
 });
 
-export async function listStudents(filter: { sectionId?: number; subjectId?: number; search?: string }) {
+export interface StudentFilter {
+  sectionId?: number;
+  subjectId?: number;
+  search?: string;
+}
+
+function studentWhere(filter: StudentFilter) {
   const search = filter.search?.trim();
   const and = [];
   // A section filter shows the section's own students plus anyone taking a subject with it.
   if (filter.sectionId) and.push({ OR: [{ sectionId: filter.sectionId }, { enrollments: { some: { sectionId: filter.sectionId } } }] });
   if (filter.subjectId) and.push({ enrollments: { some: { subjectId: filter.subjectId } } });
   if (search) and.push({ OR: [{ srCode: { contains: search } }, { name: { contains: search, mode: 'insensitive' as const } }] });
+  return { role: 'student', AND: and };
+}
 
-  const students = await prisma.user.findMany({
-    where: { role: 'student', AND: and },
-    orderBy: [{ section: { name: 'asc' } }, { name: 'asc' }],
-    select: studentSelect,
-  });
+const studentOrder = [{ section: { name: 'asc' as const } }, { name: 'asc' as const }];
+
+export async function listStudents(filter: StudentFilter) {
+  const students = await prisma.user.findMany({ where: studentWhere(filter), orderBy: studentOrder, select: studentSelect });
   return students.map(view);
+}
+
+/**
+ * The students' accounts with their current passwords, as CSV in the import template's columns
+ * (SR code, Name, Password, Email, one column per subject with the section it is taken in), so the file can be
+ * handed out or imported again. Accounts whose password was set before passwords were kept readable have
+ * an empty Password cell until the teacher resets it.
+ */
+export async function exportAccountsCsv(filter: StudentFilter): Promise<string> {
+  const subjects = await prisma.subject.findMany({ orderBy: { name: 'asc' } });
+  const students = await prisma.user.findMany({
+    where: studentWhere(filter),
+    orderBy: studentOrder,
+    select: {
+      srCode: true,
+      name: true,
+      email: true,
+      passwordEncrypted: true,
+      enrollments: { select: { subjectId: true, section: { select: { name: true } } } },
+    },
+  });
+  return toCsv([
+    ['SR code', 'Name', 'Password', 'Email', ...subjects.map((s) => s.name)],
+    ...students.map((s) => [
+      s.srCode,
+      safeCell(s.name),
+      // Written exactly: a password changed by formula protection would no longer work.
+      decryptPassword(s.passwordEncrypted) ?? '',
+      s.email ?? '',
+      ...subjects.map((sub) => s.enrollments.find((e) => e.subjectId === sub.id)?.section.name ?? ''),
+    ]),
+  ]);
 }
 
 // ---------------------------------------------------------------------------
@@ -98,13 +145,24 @@ async function assertSection(sectionId: number) {
   if (!(await prisma.section.findUnique({ where: { id: sectionId } }))) throw badRequest('Unknown section');
 }
 
+const normalizeEmail = (email: string) => email.trim().toLowerCase();
+
+/** Every account has its own email address (the teacher's included, since it is their login). */
+async function assertEmailFree(email: string, exceptUserId?: number) {
+  const owner = await prisma.user.findUnique({ where: { email }, select: { id: true } });
+  if (owner && owner.id !== exceptUserId) throw conflict(`${email} is already used by another account`, 'DUPLICATE');
+}
+
 // ---------------------------------------------------------------------------
 // Create / update
 // ---------------------------------------------------------------------------
 
+/** Creates the student, then emails them their account if they have an email address. */
 export async function createStudent(dto: CreateStudentDto) {
   await assertSection(dto.sectionId);
   if (await prisma.user.findUnique({ where: { srCode: dto.srCode } })) throw conflict(`SR code ${dto.srCode} already exists`, 'DUPLICATE');
+  const email = dto.email ? normalizeEmail(dto.email) : null;
+  if (email) await assertEmailFree(email);
   const enrollments =
     dto.enrollments === undefined
       ? (await subjectsOfSection(prisma, dto.sectionId)).map((subjectId) => ({ subjectId, sectionId: dto.sectionId }))
@@ -114,13 +172,15 @@ export async function createStudent(dto: CreateStudentDto) {
       role: 'student',
       srCode: dto.srCode,
       name: dto.name.trim(),
+      email,
       sectionId: dto.sectionId,
       passwordHash: await hashPassword(dto.password),
+      passwordEncrypted: encryptPassword(dto.password),
       enrollments: { create: enrollments },
     },
     select: studentSelect,
   });
-  return view(student);
+  return { ...view(student), accountEmail: await sendAccountEmail(student.id) };
 }
 
 async function getStudentOr404(id: number) {
@@ -135,11 +195,14 @@ async function getStudentOr404(id: number) {
 export async function updateStudent(id: number, dto: UpdateStudentDto) {
   const current = await getStudentOr404(id);
   if (dto.sectionId) await assertSection(dto.sectionId);
+  const email = dto.email ? normalizeEmail(dto.email) : null;
+  if (email) await assertEmailFree(email, id);
 
   const student = await prisma.$transaction(async (tx) => {
     await tx.user.update({
       where: { id },
       data: {
+        ...(dto.email !== undefined ? { email } : {}),
         ...(dto.name !== undefined ? { name: dto.name.trim() } : {}),
         ...(dto.sectionId !== undefined ? { sectionId: dto.sectionId } : {}),
         ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
@@ -167,13 +230,25 @@ export async function updateStudent(id: number, dto: UpdateStudentDto) {
   return view(student);
 }
 
+/** Sets a new password, signs the student out everywhere, and emails them the new one if they have an address. */
 export async function resetPassword(id: number, password: string) {
   await getStudentOr404(id);
   await prisma.user.update({
     where: { id },
-    data: { passwordHash: await hashPassword(password), failedLoginCount: 0, lockedUntil: null },
+    data: { passwordHash: await hashPassword(password), passwordEncrypted: encryptPassword(password), failedLoginCount: 0, lockedUntil: null },
   });
   await revokeAllForUser(id);
+  return { accountEmail: await sendAccountEmail(id) };
+}
+
+/** The "Send account email" button: the student's current password (or a new one for an old account). */
+export async function emailAccount(id: number) {
+  await getStudentOr404(id);
+  const result = await sendAccountEmail(id);
+  if (result.status === 'no_email') throw badRequest('This student has no email address. Add one first.');
+  if (result.status === 'not_configured') throw conflict('Email is not set up on the server (the SMTP settings in .env).', 'MAIL_NOT_CONFIGURED');
+  if (result.status === 'failed') throw new HttpError(502, `Could not send the email: ${result.error}`, 'MAIL_FAILED');
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -252,10 +327,11 @@ async function readXlsx(base64: string): Promise<RawTable> {
 
 /**
  * Columns (header row required, any order, case-insensitive):
- *   SR code, Name, Password, and either
+ *   SR code, Name, Password, optional Email, and either
  *   - one column per subject holding the section the student takes it in (blank = not taken), as in the Excel template, or
  *   - Section [+ Subjects, separated by ";", blank = both].
  * All-or-nothing: if any row is invalid nothing is created. SR codes that already exist are skipped.
+ * Afterwards every new student with an email address is emailed their account; failures are reported, not fatal.
  */
 export async function importStudents(input: { csv?: string; xlsxBase64?: string }) {
   if (!!input.csv === !!input.xlsxBase64) throw badRequest('Send either a CSV file or an Excel file');
@@ -271,7 +347,7 @@ export async function importStudents(input: { csv?: string; xlsxBase64?: string 
   const subjectCols: { index: number; subjectId: number; name: string }[] = [];
   table.headers.forEach((h, i) => {
     const key = norm(h);
-    if (['srcode', 'name', 'section', 'password', 'subjects'].includes(key)) col[key] = i;
+    if (['srcode', 'name', 'section', 'password', 'subjects', 'email'].includes(key)) col[key] = i;
     else {
       const sid = matchSubject(h, subjects);
       if (sid && !subjectCols.some((c) => c.subjectId === sid)) subjectCols.push({ index: i, subjectId: sid, name: subjects.find((s) => s.id === sid)!.name });
@@ -295,16 +371,27 @@ export async function importStudents(input: { csv?: string; xlsxBase64?: string 
       })
     ).map((u) => u.srCode),
   );
+  // Email address -> SR code of the account already using it (the teacher's login counts too).
+  const emailOwners = new Map(
+    (
+      await prisma.user.findMany({
+        where: { email: { in: table.rows.map((r) => normalizeEmail(cell(r.values, 'email'))).filter(Boolean) } },
+        select: { email: true, srCode: true },
+      })
+    ).map((u) => [u.email!, u.srCode]),
+  );
 
   const errors: ImportRowError[] = [];
   const skipped: string[] = [];
   const seen = new Set<string>();
-  const toCreate: { srCode: string; name: string; sectionId: number; password: string; enrollments: Enrollment[] }[] = [];
+  const seenEmails = new Set<string>();
+  const toCreate: { srCode: string; name: string; email: string | null; sectionId: number; password: string; enrollments: Enrollment[] }[] = [];
 
   for (const { line, values } of table.rows) {
     const srCode = cell(values, 'srcode');
     const name = cell(values, 'name');
     const password = cell(values, 'password');
+    const email = normalizeEmail(cell(values, 'email')) || null;
     const fail = (error: string) => errors.push({ line, srCode, error });
 
     if (!SR_CODE_REGEX.test(srCode)) { fail('SR code must look like 23-12345'); continue; }
@@ -313,6 +400,14 @@ export async function importStudents(input: { csv?: string; xlsxBase64?: string 
     if (!name) { fail('Name is required'); continue; }
     if (name.length > 150) { fail('Name is too long'); continue; }
     if (password.length < 6 || password.length > 72) { fail('Password must be 6-72 characters'); continue; }
+    if (email) {
+      if (!isEmail(email) || email.length > 255) { fail(`"${email}" is not a valid email address`); continue; }
+      if (seenEmails.has(email)) { fail(`Email ${email} is used twice in this file`); continue; }
+      seenEmails.add(email);
+      // A student already on the server keeps their own address (re-importing an export is fine).
+      const owner = emailOwners.get(email);
+      if (owner !== undefined && owner !== srCode) { fail(`Email ${email} is already used by another account`); continue; }
+    }
 
     const sectionCell = cell(values, 'section');
     let home = sectionCell ? matchSection(sectionCell, sections) : undefined;
@@ -349,7 +444,7 @@ export async function importStudents(input: { csv?: string; xlsxBase64?: string 
     }
     if (rowError) { fail(rowError); continue; }
     if (existing.has(srCode)) { skipped.push(srCode); continue; }
-    toCreate.push({ srCode, name, sectionId: home!, password, enrollments });
+    toCreate.push({ srCode, name, email, sectionId: home!, password, enrollments });
   }
 
   if (errors.length) throw badRequest(`${errors.length} row(s) have problems. Nothing was imported.`, errors);
@@ -357,23 +452,28 @@ export async function importStudents(input: { csv?: string; xlsxBase64?: string 
   const hashed = await Promise.all(toCreate.map(async (s) => ({ ...s, passwordHash: await hashPassword(s.password) })));
   const created = await prisma.$transaction(
     async (tx) => {
+      const out: { id: number; srCode: string }[] = [];
       for (const s of hashed) {
-        await tx.user.create({
+        const user = await tx.user.create({
           data: {
             role: 'student',
             srCode: s.srCode,
             name: s.name,
+            email: s.email,
             sectionId: s.sectionId,
             passwordHash: s.passwordHash,
+            passwordEncrypted: encryptPassword(s.password),
             enrollments: { create: s.enrollments },
           },
+          select: { id: true },
         });
+        out.push({ id: user.id, srCode: s.srCode });
       }
-      return hashed.length;
+      return out;
     },
     { timeout: 120_000, maxWait: 10_000 },
   );
-  return { created, skipped };
+  return { created: created.length, skipped, emails: await sendAccountEmails(created) };
 }
 
 // ---------------------------------------------------------------------------
@@ -399,8 +499,10 @@ export async function studentsTemplate(): Promise<Buffer> {
     { header: 'SR code', key: 'sr', width: 14, style: { numFmt: '@' } },
     { header: 'Name', key: 'name', width: 34 },
     { header: 'Password', key: 'password', width: 16, style: { numFmt: '@' } },
+    { header: 'Email', key: 'email', width: 30 },
     ...subjects.map((s, i) => ({ header: s.name, key: `subject${i}`, width: Math.max(18, s.name.length + 4) })),
   ];
+  const FIRST_SUBJECT_COL = 5;
   const header = ws.getRow(1);
   header.height = 24;
   header.eachCell((c) => {
@@ -410,8 +512,9 @@ export async function studentsTemplate(): Promise<Buffer> {
     c.border = { bottom: { style: 'medium', color: { argb: ORANGE } } };
   });
   header.getCell(1).note = 'Format NN-NNNNN, e.g. 23-12345';
+  header.getCell(4).note = 'Optional. The student is emailed their SR code and password.';
   subjects.forEach((s, i) => {
-    header.getCell(4 + i).note = `Section the student takes ${s.name} in. Leave blank if they do not take it.`;
+    header.getCell(FIRST_SUBJECT_COL + i).note = `Section the student takes ${s.name} in. Leave blank if they do not take it.`;
   });
 
   for (let r = 2; r <= ROWS + 1; r++) {
@@ -424,7 +527,7 @@ export async function studentsTemplate(): Promise<Buffer> {
       errorTitle: 'Password', error: 'The password must be 6 to 72 characters.',
     };
     subjects.forEach((_, i) => {
-      ws.getCell(r, 4 + i).dataValidation = {
+      ws.getCell(r, FIRST_SUBJECT_COL + i).dataValidation = {
         type: 'list', allowBlank: true, formulae: [sectionList], showErrorMessage: true,
         errorTitle: 'Section', error: 'Pick a section from the list, or leave it blank if the student does not take this subject.',
       };
@@ -440,11 +543,12 @@ export async function studentsTemplate(): Promise<Buffer> {
     ['1. One row per student, starting on row 2. Do not change the header row.'],
     ['2. SR code: format NN-NNNNN, for example 23-12345.'],
     ['3. Password: the student\'s first password (6-72 characters). You can reset it later on the Students page.'],
-    [`4. Subject columns (${subjects.map((s) => s.name).join(', ')}): choose the section the student takes that subject in.`],
+    ['4. Email (optional): the student is emailed their SR code, password and subjects. Each student needs their own address.'],
+    [`5. Subject columns (${subjects.map((s) => s.name).join(', ')}): choose the section the student takes that subject in.`],
     ['   Leave the cell blank if the student does not take that subject.'],
     ['   Irregular students take one subject in one section and the other subject in another section: same row, same account.'],
-    ['5. The student\'s own section is the first section in their row.'],
-    ['6. Save as .xlsx and upload it on Students > Import. If any row has a problem nothing is imported and every problem is listed.'],
+    ['6. The student\'s own section is the first section in their row.'],
+    ['7. Save as .xlsx and upload it on Students > Import. If any row has a problem nothing is imported and every problem is listed.'],
     ['   SR codes that already exist are skipped (change their subjects on the Students page instead).'],
     [''],
     ['Examples', { bold: true, size: 12 }],
@@ -453,13 +557,13 @@ export async function studentsTemplate(): Promise<Buffer> {
     const row = help.addRow([t]);
     if (font) row.font = font;
   });
-  const exHeader = help.addRow(['SR code | Name | Password | ' + subjects.map((s) => s.name).join(' | ')]);
+  const exHeader = help.addRow(['SR code | Name | Password | Email | ' + subjects.map((s) => s.name).join(' | ')]);
   exHeader.font = { bold: true };
   const [s1, s2] = [sections[0]?.name ?? '', sections[1]?.name ?? sections[0]?.name ?? ''];
-  help.addRow([`23-12345 | Dela Cruz, Juan | juan2026 | ${subjects.map(() => s1).join(' | ')}      (takes every subject with ${s1})`]);
-  help.addRow([`23-12346 | Santos, Maria | maria2026 | ${s1}${subjects.length > 1 ? ' | ' : ''}${subjects.slice(1).map(() => '').join(' | ')}      (only the first subject)`]);
+  help.addRow([`23-12345 | Dela Cruz, Juan | juan2026 | juan@example.com | ${subjects.map(() => s1).join(' | ')}      (takes every subject with ${s1})`]);
+  help.addRow([`23-12346 | Santos, Maria | maria2026 |  | ${s1}${subjects.length > 1 ? ' | ' : ''}${subjects.slice(1).map(() => '').join(' | ')}      (only the first subject, no email)`]);
   if (subjects.length > 1) {
-    help.addRow([`23-12347 | Rizal, Jose | jose2026 | ${s1} | ${s2}      (irregular: different section per subject, one account)`]);
+    help.addRow([`23-12347 | Rizal, Jose | jose2026 | jose@example.com | ${s1} | ${s2}      (irregular: different section per subject, one account)`]);
   }
 
   return Buffer.from(await wb.xlsx.writeBuffer());

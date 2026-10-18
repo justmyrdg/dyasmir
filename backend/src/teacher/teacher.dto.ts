@@ -18,6 +18,7 @@ import {
   ValidateNested,
   IsNotEmpty,
   IsBase64,
+  IsEmail,
 } from 'class-validator';
 import { SR_CODE_REGEX } from '../lib/sr-code';
 
@@ -53,6 +54,12 @@ export class CreateStudentDto {
   @MaxLength(72)
   password!: string;
 
+  /** Optional. The student is emailed their SR code and password. */
+  @IsOptional()
+  @IsEmail({}, { message: 'email must be a valid email address' })
+  @MaxLength(255)
+  email?: string | null;
+
   /** Subjects the student takes, each with its section. Omitted = every subject of their own section. */
   @IsOptional()
   @IsArray()
@@ -85,6 +92,12 @@ export class UpdateStudentDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  /** A new email address, or null to remove it. */
+  @IsOptional()
+  @IsEmail({}, { message: 'email must be a valid email address' })
+  @MaxLength(255)
+  email?: string | null;
 }
 
 export class ResetPasswordDto {

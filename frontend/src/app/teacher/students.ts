@@ -1,7 +1,7 @@
 import { Component, computed, inject, OnInit, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { errorDetails, errorMessage } from '../core/errors';
-import type { Student, Subject } from '../core/models';
+import type { AccountEmailStatus, AccountEmailSummary, Student, Subject } from '../core/models';
 import { SR_CODE_REGEX } from '../core/sr-code';
 import { formatManila } from '../core/time';
 import { readFileBase64, readFileText, TeacherApi } from './teacher-api';
@@ -29,7 +29,14 @@ export function shortSubject(name: string): string {
           irregular students can take each subject in a different section.
         </p>
       </div>
-      <div class="flex gap-2">
+      <div class="flex flex-wrap gap-2">
+        <button
+          class="btn-secondary"
+          title="SR codes, current passwords and emails of the students matching the filters below. Students added before passwords were saved have a blank password until you reset it."
+          (click)="exportAccounts()"
+        >
+          Export accounts (CSV)
+        </button>
         <button class="btn-secondary" (click)="panel.set(panel() === 'import' ? null : 'import')">Import from Excel</button>
         <button class="btn-primary" (click)="openAdd()">Add student</button>
       </div>
@@ -45,6 +52,13 @@ export function shortSubject(name: string): string {
           <ul class="mt-2 list-disc pl-5">
             @for (e of importErrors(); track e.line) {
               <li>Row {{ e.line }}{{ e.srCode ? ' (' + e.srCode + ')' : '' }}: {{ e.error }}</li>
+            }
+          </ul>
+        }
+        @if (emailProblems().length) {
+          <ul class="mt-2 list-disc pl-5">
+            @for (e of emailProblems(); track e.srCode) {
+              <li>{{ e.srCode }}: {{ e.error }}</li>
             }
           </ul>
         }
@@ -76,6 +90,11 @@ export function shortSubject(name: string): string {
           <label class="label" for="npw">Initial password</label>
           <input id="npw" class="input" name="pw" type="text" placeholder="min 6 characters" [(ngModel)]="form.password" />
         </div>
+        <div class="md:col-span-3">
+          <label class="label" for="nemail">Email (optional)</label>
+          <input id="nemail" class="input" name="email" type="email" placeholder="student@example.com" maxlength="255" [(ngModel)]="form.email" />
+        </div>
+        <p class="self-end pb-2 text-xs text-slate-500 md:col-span-3">With an email address, the student is sent their SR code, password and subjects as soon as you save.</p>
         <fieldset class="md:col-span-6">
           <legend class="label">Subjects and the section each is taken in</legend>
           <div class="grid gap-3 sm:grid-cols-2">
@@ -112,6 +131,9 @@ export function shortSubject(name: string): string {
         </div>
         <ol class="mb-4 list-decimal space-y-1 pl-5 text-sm text-slate-600">
           <li><strong>SR code</strong> (NN-NNNNN), <strong>Name</strong> and the first <strong>Password</strong> (6 or more characters).</li>
+          <li>
+            <strong>Email</strong> is optional. Every student with one is emailed their SR code, password and subjects after the import.
+          </li>
           <li>
             Under each subject, pick the <strong>section</strong> the student takes it in from the dropdown. Leave it blank if they don't take that subject.
           </li>
@@ -157,6 +179,7 @@ export function shortSubject(name: string): string {
             <tr>
               <th>SR code</th>
               <th>Name</th>
+              <th>Email</th>
               <th>Own section</th>
               <th>Subjects (section taken in)</th>
               <th>Status</th>
@@ -173,6 +196,14 @@ export function shortSubject(name: string): string {
                     <span class="badge ml-1 bg-amber-100 text-amber-800" title="Takes a subject in a section other than their own">Irregular</span>
                   }
                   <div class="text-xs text-slate-400">Added {{ fmt(s.createdAt) }}</div>
+                </td>
+                <td class="text-sm">
+                  @if (s.email) {
+                    <span class="break-all">{{ s.email }}</span>
+                  } @else {
+                    <span class="text-slate-400">—</span>
+                  }
+                  <button class="btn-ghost btn-sm" [disabled]="savingId() === s.id" (click)="editEmail(s)">{{ s.email ? 'Edit' : 'Add' }}</button>
                 </td>
                 <td class="whitespace-nowrap">{{ s.section }}</td>
                 <td>
@@ -204,6 +235,9 @@ export function shortSubject(name: string): string {
                   }
                 </td>
                 <td class="text-right whitespace-nowrap">
+                  @if (s.email) {
+                    <button class="btn-ghost btn-sm" [disabled]="savingId() === s.id" (click)="sendAccountEmail(s)">Send account email</button>
+                  }
                   <button class="btn-ghost btn-sm" (click)="resetPassword(s)">Reset password</button>
                   @if (s.isActive) {
                     <button class="btn-ghost btn-sm text-rose-600" (click)="setActive(s, false)">Deactivate</button>
@@ -214,7 +248,7 @@ export function shortSubject(name: string): string {
               </tr>
             } @empty {
               <tr>
-                <td colspan="6" class="py-8 text-center text-slate-500">{{ loading() ? 'Loading…' : 'No students found.' }}</td>
+                <td colspan="7" class="py-8 text-center text-slate-500">{{ loading() ? 'Loading…' : 'No students found.' }}</td>
               </tr>
             }
           </tbody>
@@ -232,6 +266,8 @@ export class StudentsPage implements OnInit {
   protected readonly error = signal('');
   protected readonly message = signal('');
   protected readonly importErrors = signal<ImportError[]>([]);
+  /** Account emails that could not be sent after an import. */
+  protected readonly emailProblems = signal<{ srCode: string; error: string }[]>([]);
   protected readonly panel = signal<'add' | 'import' | null>(null);
   protected readonly sectionFilter = signal<number | null>(null);
   protected readonly subjectFilter = signal<number | null>(null);
@@ -244,6 +280,7 @@ export class StudentsPage implements OnInit {
     name: '',
     sectionId: null as number | null,
     password: '',
+    email: '',
     /** subjectId -> section it is taken in (null = not taken) */
     enroll: {} as Record<number, number | null>,
   };
@@ -277,7 +314,7 @@ export class StudentsPage implements OnInit {
     const sectionId = this.form.sectionId ?? this.api.sections()[0]?.id ?? null;
     const enroll: Record<number, number | null> = {};
     for (const sub of this.api.subjects()) enroll[sub.id] = sectionId;
-    this.form = { srCode: '', name: '', password: '', sectionId, enroll };
+    this.form = { srCode: '', name: '', password: '', email: '', sectionId, enroll };
   }
 
   protected openAdd() {
@@ -309,6 +346,17 @@ export class StudentsPage implements OnInit {
     this.error.set('');
     this.message.set('');
     this.importErrors.set([]);
+    this.emailProblems.set([]);
+  }
+
+  /** A sentence for the success message, or '' (problems with the email go to the error box). */
+  private emailNote(r: AccountEmailStatus, email: string | null): string {
+    if (r.status === 'sent') {
+      return ` Their SR code and password were emailed to ${email}.` + (r.newPassword ? ' They had no saved password, so the email has a new one.' : '');
+    }
+    if (r.status === 'failed') this.error.set(`The account email to ${email} could not be sent: ${r.error}`);
+    if (r.status === 'not_configured') this.error.set('Email is not set up on the server (the SMTP settings in .env), so no account email was sent.');
+    return '';
   }
 
   protected async add() {
@@ -318,15 +366,16 @@ export class StudentsPage implements OnInit {
       const enrollments = Object.entries(this.form.enroll)
         .filter(([, sectionId]) => sectionId !== null)
         .map(([subjectId, sectionId]) => ({ subjectId: Number(subjectId), sectionId: sectionId! }));
-      const s = await this.api.post<Student>('/api/teacher/students', {
+      const s = await this.api.post<Student & { accountEmail: AccountEmailStatus }>('/api/teacher/students', {
         srCode: this.form.srCode.trim(),
         name: this.form.name.trim(),
         sectionId: this.form.sectionId,
         password: this.form.password,
+        email: this.form.email.trim() || null,
         enrollments,
       });
       const subjects = s.subjects.length ? s.subjects.map((x) => `${x.name} (${x.section})`).join(' and ') : 'no subjects yet';
-      this.message.set(`Added ${s.name} (${s.srCode}), taking ${subjects}.`);
+      this.message.set(`Added ${s.name} (${s.srCode}), taking ${subjects}.` + this.emailNote(s.accountEmail, s.email));
       this.resetForm();
       await this.load();
     } catch (err) {
@@ -381,10 +430,18 @@ export class StudentsPage implements OnInit {
       const isExcel = /\.xlsx$/i.test(file.name);
       if (!isExcel && !/\.csv$/i.test(file.name)) throw new Error('Choose the .xlsx template (or a .csv file).');
       const body = isExcel ? { xlsxBase64: await readFileBase64(file) } : { csv: await readFileText(file) };
-      const res = await this.api.post<{ created: number; skipped: string[] }>('/api/teacher/students/import', body);
+      const res = await this.api.post<{ created: number; skipped: string[]; emails: AccountEmailSummary }>('/api/teacher/students/import', body);
+      const mail = res.emails;
       this.message.set(
-        `Imported ${res.created} student(s).` + (res.skipped.length ? ` Skipped ${res.skipped.length} existing SR code(s): ${res.skipped.join(', ')}.` : ''),
+        `Imported ${res.created} student(s).` +
+          (mail.sent ? ` Emailed ${mail.sent} of them their SR code and password.` : '') +
+          (res.skipped.length ? ` Skipped ${res.skipped.length} existing SR code(s): ${res.skipped.join(', ')}.` : ''),
       );
+      if (mail.notConfigured) this.error.set('Email is not set up on the server (the SMTP settings in .env), so no account emails were sent.');
+      if (mail.failed.length) {
+        this.error.set(`${mail.failed.length} account email(s) could not be sent. The students were added; fix the address, then use Send account email.`);
+        this.emailProblems.set(mail.failed);
+      }
       this.panel.set(null);
       await this.load();
     } catch (err) {
@@ -406,10 +463,57 @@ export class StudentsPage implements OnInit {
     }
     this.reset();
     try {
-      await this.api.post(`/api/teacher/students/${s.id}/reset-password`, { password: pw });
-      this.message.set(`Password reset for ${s.name}. Any open sessions were signed out.`);
+      const res = await this.api.post<{ accountEmail: AccountEmailStatus }>(`/api/teacher/students/${s.id}/reset-password`, { password: pw });
+      this.message.set(`Password reset for ${s.name}. Any open sessions were signed out.` + this.emailNote(res.accountEmail, s.email));
     } catch (err) {
       this.error.set(errorMessage(err));
+    }
+  }
+
+  protected async editEmail(s: Student) {
+    const value = prompt(`Email address for ${s.name} (${s.srCode}). Leave it empty to remove it:`, s.email ?? '');
+    if (value === null) return;
+    this.reset();
+    this.savingId.set(s.id);
+    try {
+      const updated = await this.api.patch<Student>(`/api/teacher/students/${s.id}`, { email: value.trim() || null });
+      this.students.update((list) => list.map((x) => (x.id === s.id ? updated : x)));
+      this.message.set(
+        updated.email ? `Email for ${s.name} is now ${updated.email}. Use Send account email to send them their account.` : `Email removed for ${s.name}.`,
+      );
+    } catch (err) {
+      this.error.set(errorMessage(err));
+    } finally {
+      this.savingId.set(null);
+    }
+  }
+
+  protected async sendAccountEmail(s: Student) {
+    this.reset();
+    this.savingId.set(s.id);
+    try {
+      const r = await this.api.post<AccountEmailStatus>(`/api/teacher/students/${s.id}/send-account-email`, {});
+      this.message.set(
+        `Account email sent to ${s.email}.` +
+          (r.status === 'sent' && r.newPassword ? ' They had no saved password, so the email has a new one and their old password no longer works.' : ''),
+      );
+    } catch (err) {
+      this.error.set(errorMessage(err));
+    } finally {
+      this.savingId.set(null);
+    }
+  }
+
+  protected async exportAccounts() {
+    this.reset();
+    try {
+      await this.api.download(
+        '/api/teacher/students/export',
+        { sectionId: this.sectionFilter(), subjectId: this.subjectFilter(), search: this.search().trim() || null },
+        'JASthinkAboutIT-student-accounts.csv',
+      );
+    } catch (err) {
+      this.error.set(errorMessage(err, 'Could not export the accounts.'));
     }
   }
 

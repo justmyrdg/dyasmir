@@ -204,7 +204,9 @@ cd frontend && npm install && npm start
 | Subject enrollment | `student_subjects (student_id, subject_id, section_id)`: the subjects each student takes, and the section they take each one in. A composite foreign key to `section_subjects` guarantees the section offers the subject. An irregular student uses **one account** and sees each subject's quizzes from the section they take it in. The student dashboard, starting a quiz, results, dashboard counts and the Assign screen's "x / y submitted" all follow this. A trigger allows enrollments only for students. If a student is removed from a subject, attempts they already made stay in Results |
 | Students touch only their own data | Every student query filters by the logged-in user and their section. Another student's attempt id returns 404. The save body may contain only `answers` and `currentIndex` (`forbidNonWhitelisted`). Saves after the deadline or after submission get 409 |
 | Login protection | Rate limits per IP+account (10/min) and per IP (300/min, because a whole class may share one school IP). 5 wrong passwords lock the account for 5 minutes |
-| Deactivate / reset password | Revokes all refresh tokens. The user is reloaded from the DB on every request, so a deactivated account loses access immediately |
+| Deactivate / reset password | Revokes all refresh tokens, back-dated past the 30-second grace for concurrent refreshes, so no old session can get a new access token. The user is reloaded from the DB on every request, so a deactivated account loses access immediately |
+| Students choose their own password | Adding, importing or resetting a student sets `must_change_password`. Until they change it at `POST /api/account/password`, `requireRole` answers every student endpoint with 403 `PASSWORD_CHANGE_REQUIRED`, and the app shows the change-password page. The new password is not stored readable, so the accounts export leaves it blank until the teacher resets it. Changing it ends every other session |
+| Who is online | `requireAuth` writes `users.last_seen_at` (database clock, at most every 30 s), and student pages ping `POST /api/account/ping` every minute. **Online now** (`GET /api/teacher/online`) lists students seen in the last 150 s who still have an active session, so signing out removes them at once |
 | Editing a quiz after students started | Question and choice ids are locked (attempts reference them). Wording, points, the correct choice and accepted answers can still change, and submitted attempts are re-graded in the same transaction |
 | DB constraints | CHECKs on role, SR code format, statuses, `due_at > start_at`, positive time limit/points, submitted ⇔ score. A deferred trigger enforces exactly 4 choices with exactly 1 correct per multiple-choice question |
 
@@ -297,12 +299,15 @@ All endpoints are under `/api`. Every request body is validated with class-valid
 |---|---|---|
 | `POST /auth/login` | anyone | `{ srCode, password }` (student) or `{ email, password }` (teacher) |
 | `POST /auth/refresh`, `POST /auth/logout`, `GET /auth/me` | session | rotate cookie / end session / current user |
+| `POST /account/password` | student | `{ currentPassword, newPassword }`: choose their own password (8+ characters, no SR code); returns a new session and ends the others |
+| `POST /account/ping` | signed in | "still here", for Online now (pages call it every minute) |
 | `GET /student/assignments` | student | own section's quizzes with status and server time |
 | `POST /attempts/start` | student | `{ assignmentId }`: create or resume |
 | `GET /attempts/:id` | student (owner) | questions in saved order (no keys), saved answers, current index, deadline, server time |
 | `POST /attempts/:id/save` | student (owner) | `{ answers?: [{questionId, answer}], currentIndex? }` |
 | `POST /attempts/:id/submit`, `GET /attempts/:id/result` | student (owner) | submit / score (+ feedback if enabled) |
 | `GET /teacher/dashboard` | teacher | per section × subject stats, upcoming/open quizzes |
+| `GET /teacher/online` | teacher | students online now (per section counts, last active, the quiz each is taking) |
 | `GET /teacher/results[/export?format=csv\|xlsx]` | teacher | filter by `sectionId`, `subjectId`, `quizId` |
 | `GET /teacher/attempts/:id`, `DELETE /teacher/attempts/:id` | teacher | answers with key / reset an attempt |
 | `PUT /teacher/attempts/:id/items/:questionId` | teacher | re-check one item: `{ correct: true \| false \| null }` |

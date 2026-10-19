@@ -1,6 +1,6 @@
 import type { NextFunction, Request, Response } from 'express';
-import { forbidden, unauthorized } from '../lib/http-error';
-import { loadAuthUser } from './auth.service';
+import { forbidden, HttpError, unauthorized } from '../lib/http-error';
+import { loadAuthUser, touchLastSeen } from './auth.service';
 import type { AuthUser, Role } from './auth.types';
 import { verifyAccessToken } from './tokens';
 
@@ -16,6 +16,7 @@ export async function requireAuth(req: Request, _res: Response, next: NextFuncti
   }
   const user = await loadAuthUser(userId);
   if (!user) throw unauthorized('Account not found or deactivated');
+  await touchLastSeen(user.id);
   req.user = user;
   next();
 }
@@ -25,6 +26,8 @@ export function requireRole(role: Role) {
     if (!req.user) throw unauthorized();
     if (req.user.role !== role) throw forbidden(`This endpoint is for ${role}s only`);
     if (role === 'student' && req.user.sectionId === null) throw forbidden('Student has no section');
+    // Every student and teacher router goes through here; /api/account (where the password is changed) does not.
+    if (req.user.mustChangePassword) throw new HttpError(403, 'Choose your own password before you continue.', 'PASSWORD_CHANGE_REQUIRED');
     next();
   };
 }

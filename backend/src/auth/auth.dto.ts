@@ -18,3 +18,15 @@ export class LoginDto {
   @MaxLength(72)
   password!: string;
 }
+
+export class ChangePasswordDto {
+  @IsString()
+  @MinLength(1)
+  @MaxLength(72)
+  currentPassword!: string;
+
+  @IsString()
+  @MinLength(8, { message: 'Use at least 8 characters for your new password' })
+  @MaxLength(72)
+  newPassword!: string;
+}

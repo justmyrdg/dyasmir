@@ -8,6 +8,8 @@ export interface User {
   email: string | null;
   sectionId: number | null;
   sectionName: string | null;
+  /** Still signed in with a password the teacher gave them: they must choose their own before anything else. */
+  mustChangePassword: boolean;
 }
 
 export interface Session {
@@ -109,6 +111,9 @@ export interface Student {
   isActive: boolean;
   createdAt: string;
   lockedUntil: string | null;
+  /** Still has the password the teacher gave them (must change it at sign-in). */
+  mustChangePassword: boolean;
+  lastLoginAt: string | null;
 }
 
 /** What happened to the account email (SR code + password) after adding a student or resetting a password. */
@@ -191,6 +196,26 @@ export interface AssignmentOverview {
       submitted: number;
       inProgress: number;
     } | null;
+  }[];
+}
+
+/** GET /api/teacher/online: students signed in and active in the last few minutes. */
+export interface OnlineNow {
+  serverNow: string;
+  /** Seen within this many seconds counts as online. */
+  onlineSeconds: number;
+  /** Per section (by each student's own section): active students and how many are online. */
+  sections: { section: string; students: number; online: number }[];
+  students: {
+    id: number;
+    srCode: string;
+    name: string;
+    section: string | null;
+    seenSecondsAgo: number;
+    lastLoginAt: string | null;
+    mustChangePassword: boolean;
+    /** The quiz they have open (an in-progress attempt). */
+    taking: { attemptId: number; title: string } | null;
   }[];
 }
 

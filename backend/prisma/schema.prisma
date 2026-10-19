@@ -75,6 +75,12 @@ model User {
   /// Students only: the current password, encrypted with CREDENTIALS_KEY so the teacher can export it.
   /// Null for accounts whose password was set before this existed.
   passwordEncrypted String?         @map("password_encrypted")
+  /// Students: true while they still sign in with a password the teacher gave them (add, import, reset).
+  /// Until they choose their own, every student endpoint answers 403 PASSWORD_CHANGE_REQUIRED.
+  mustChangePassword Boolean        @default(false) @map("must_change_password")
+  /// The last authenticated request, written at most every 30 s. The teacher's "Online now" page reads it.
+  lastSeenAt       DateTime?        @map("last_seen_at") @db.Timestamptz(6)
+  lastLoginAt      DateTime?        @map("last_login_at") @db.Timestamptz(6)
   isActive         Boolean          @default(true) @map("is_active")
   failedLoginCount Int              @default(0) @map("failed_login_count")
   lockedUntil      DateTime?        @map("locked_until") @db.Timestamptz(6)

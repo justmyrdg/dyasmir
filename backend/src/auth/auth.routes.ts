@@ -30,7 +30,7 @@ const loginPerIp = rateLimit({
   message: tooMany,
 });
 
-function sendSession(res: Response, session: auth.Session) {
+export function sendSession(res: Response, session: auth.Session) {
   if (session.refreshToken) res.cookie(REFRESH_COOKIE, session.refreshToken, refreshCookieOptions());
   res.json({ accessToken: session.accessToken, expiresIn: session.expiresIn, user: session.user });
 }

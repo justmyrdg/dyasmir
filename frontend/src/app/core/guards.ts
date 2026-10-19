@@ -1,5 +1,5 @@
 import { inject } from '@angular/core';
-import { CanActivateFn, Router } from '@angular/router';
+import { CanActivateChildFn, CanActivateFn, Router } from '@angular/router';
 import { AuthService } from './auth.service';
 import type { Role } from './models';
 
@@ -14,6 +14,13 @@ export function roleGuard(role: Role): CanActivateFn {
     return true;
   };
 }
+
+/** Student pages: someone still on the teacher's temporary password goes to choose their own first. */
+export const passwordChosen: CanActivateChildFn = (_route, state) => {
+  const auth = inject(AuthService);
+  if (!auth.user()?.mustChangePassword || state.url.startsWith('/student/password')) return true;
+  return inject(Router).createUrlTree(['/student/password']);
+};
 
 export const homeRedirect: CanActivateFn = () => {
   const auth = inject(AuthService);

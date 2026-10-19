@@ -652,6 +652,8 @@ describe('irregular students and the Excel template', () => {
 });
 
 async function studentToken24(srCode: string) {
+  // Imported, so they would first have to choose a password; these tests are about enrollment.
+  await prisma.user.update({ where: { srCode }, data: { mustChangePassword: false } });
   const res = await request(app).post('/api/auth/login').send({ srCode, password: 'pass1234' });
   expect(res.status).toBe(200);
   return res.body.accessToken as string;
@@ -1217,5 +1219,146 @@ describe('teacher account from TEACHER_EMAIL / TEACHER_PASSWORD (hosts with no s
     await expect(ensureTeacher({ email: 'new.teacher@test.local', name: 'X', password: 'short' })).rejects.toThrow(/8-72/);
     await expect(ensureTeacher({ email: 'new.teacher@test.local', password: 'long-enough1' })).rejects.toThrow(/name/);
     expect(await prisma.user.findUnique({ where: { email: 'new.teacher@test.local' } })).toBeNull();
+  });
+});
+
+describe('students choose their own password at first sign-in', () => {
+  const SR = '23-80001';
+  let token: string;
+  const change = (t: string, body: Record<string, string>) => request(app).post('/api/account/password').set(auth(t)).send(body);
+  const exportedPassword = async (srCode: string) => {
+    const res = await request(app).get(`/api/teacher/students/export?search=${srCode}`).set(auth(teacherToken));
+    const rows = parseCsv(res.text.replace(/^﻿/, ''), { columns: true }) as Record<string, string>[];
+    return rows.find((r) => r['SR code'] === srCode)?.Password;
+  };
+
+  it('a student the teacher adds is held at "change your password" until they do', async () => {
+    const created = await request(app)
+      .post('/api/teacher/students')
+      .set(auth(teacherToken))
+      .send({ srCode: SR, name: 'First Login', sectionId: sectionA, password: 'teacher-gave1' });
+    expect(created.status).toBe(201);
+    expect(created.body.mustChangePassword).toBe(true);
+
+    const res = await login({ srCode: SR, password: 'teacher-gave1' });
+    expect(res.status).toBe(200);
+    expect(res.body.user.mustChangePassword).toBe(true);
+    token = res.body.accessToken;
+    for (const blocked of [
+      request(app).get('/api/student/assignments').set(auth(token)),
+      request(app).post('/api/attempts/start').set(auth(token)).send({ assignmentId: assignmentA }),
+    ]) {
+      const r = await blocked;
+      expect(r.status).toBe(403);
+      expect(r.body.code).toBe('PASSWORD_CHANGE_REQUIRED');
+    }
+  });
+
+  it('refuses a wrong current password, the same password, a short one, or one containing the SR code', async () => {
+    expect((await change(token, { currentPassword: 'wrong-pass1', newPassword: 'my-own-pass1' })).body.code).toBe('WRONG_PASSWORD');
+    expect((await change(token, { currentPassword: 'teacher-gave1', newPassword: 'teacher-gave1' })).status).toBe(400);
+    expect((await change(token, { currentPassword: 'teacher-gave1', newPassword: 'short' })).status).toBe(400);
+    expect((await change(token, { currentPassword: 'teacher-gave1', newPassword: `x${SR}x` })).status).toBe(400);
+    expect((await change(token, { currentPassword: 'teacher-gave1', newPassword: 'x2380001x' })).status).toBe(400);
+  });
+
+  it('after the change the student gets in, other sessions end, and the teacher cannot see the new password', async () => {
+    const otherDevice = (await login({ srCode: SR, password: 'teacher-gave1' })).headers['set-cookie'];
+    expect(await exportedPassword(SR)).toBe('teacher-gave1');
+
+    const res = await change(token, { currentPassword: 'teacher-gave1', newPassword: 'my-own-pass1' });
+    expect(res.status).toBe(200);
+    expect(res.body.user.mustChangePassword).toBe(false);
+    expect(String(res.headers['set-cookie'])).toMatch(/qp_rt=.+Path=\/api\/auth/);
+    expect((await request(app).get('/api/student/assignments').set(auth(res.body.accessToken))).status).toBe(200);
+
+    expect((await request(app).post('/api/auth/refresh').set('Cookie', otherDevice)).status).toBe(401);
+    expect((await login({ srCode: SR, password: 'teacher-gave1' })).status).toBe(401);
+    expect((await login({ srCode: SR, password: 'my-own-pass1' })).body.user.mustChangePassword).toBe(false);
+    expect(await exportedPassword(SR)).toBe('');
+  });
+
+  it('a teacher reset gives a temporary password again', async () => {
+    const { id } = await prisma.user.findUniqueOrThrow({ where: { srCode: SR } });
+    await request(app).post(`/api/teacher/students/${id}/reset-password`).set(auth(teacherToken)).send({ password: 'teacher-gave2' }).expect(200);
+    expect((await login({ srCode: SR, password: 'teacher-gave2' })).body.user.mustChangePassword).toBe(true);
+    expect(await exportedPassword(SR)).toBe('teacher-gave2');
+  });
+
+  it('imported students must change it too; the teacher cannot use this (their password is set on the server)', async () => {
+    const imp = await request(app)
+      .post('/api/teacher/students/import')
+      .set(auth(teacherToken))
+      .send({ csv: 'SR code,Name,Password,Section\n23-80002,Imported First,import-pass1,BCpET3101\n' });
+    expect(imp.body.created).toBe(1);
+    expect((await login({ srCode: '23-80002', password: 'import-pass1' })).body.user.mustChangePassword).toBe(true);
+    const t = await login({ email: 'teacher@test.local', password: 'teacherpw1' });
+    expect(t.body.user.mustChangePassword).toBe(false);
+    expect((await change(t.body.accessToken, { currentPassword: 'teacherpw1', newPassword: 'teacher-new1' })).status).toBe(403);
+  });
+});
+
+describe('who is online', () => {
+  const SR = ['23-90001', '23-90002', '23-90003'];
+  const tokens: string[] = [];
+  const cookies: string[][] = [];
+  type Online = {
+    serverNow: string;
+    sections: { section: string; online: number; students: number }[];
+    students: { srCode: string; section: string; seenSecondsAgo: number; lastLoginAt: string | null; taking: { attemptId: number; title: string } | null }[];
+  };
+  const online = async (): Promise<Online> => {
+    const res = await request(app).get('/api/teacher/online').set(auth(teacherToken));
+    expect(res.status).toBe(200);
+    return res.body;
+  };
+
+  beforeAll(async () => {
+    const hash = await hashPassword(PW);
+    for (const [i, srCode] of SR.entries()) {
+      const s = await prisma.user.create({ data: { role: 'student', srCode, name: `Online ${i + 1}`, sectionId: sectionB, passwordHash: hash } });
+      await prisma.studentSubject.create({ data: { studentId: s.id, subjectId, sectionId: sectionB } });
+      const res = await login({ srCode, password: PW });
+      tokens.push(res.body.accessToken);
+      cookies.push(res.headers['set-cookie'] as unknown as string[]);
+    }
+  });
+
+  it('lists signed-in students seen in the last few minutes, with the quiz they are taking', async () => {
+    const quiz = await request(app)
+      .post('/api/teacher/quizzes/import')
+      .set(auth(teacherToken))
+      .send({ data: { ...quizJson.quizzes[0], title: 'Online check quiz', secureMode: false } });
+    const asg = await request(app)
+      .put(`/api/teacher/quizzes/${quiz.body.created[0].id}/assignments`)
+      .set(auth(teacherToken))
+      .send({ items: [{ sectionId: sectionB, startAt: await dbIso(-5), dueAt: await dbIso(60) }] });
+    const assignmentId = asg.body.sections.find((s: { sectionId: number }) => s.sectionId === sectionB).assignment.id;
+    const attempt = await request(app).post('/api/attempts/start').set(auth(tokens[0])).send({ assignmentId });
+    expect(attempt.status).toBeLessThan(300);
+    await request(app).post('/api/account/ping').set(auth(tokens[1])).expect(204);
+
+    const now = await online();
+    const mine = now.students.filter((s) => SR.includes(s.srCode));
+    expect(mine.map((s) => s.srCode).sort()).toEqual(SR);
+    expect(mine.find((s) => s.srCode === SR[0])!.taking).toEqual({ attemptId: attempt.body.id, title: 'Online check quiz' });
+    expect(mine.find((s) => s.srCode === SR[1])!.taking).toBeNull();
+    expect(mine.every((s) => s.seenSecondsAgo >= 0 && s.seenSecondsAgo < 60 && s.lastLoginAt !== null && s.section === 'BCpET3102')).toBe(true);
+    const b = now.sections.find((s) => s.section === 'BCpET3102')!;
+    expect(b.online).toBeGreaterThanOrEqual(3);
+    expect(b.students).toBeGreaterThanOrEqual(b.online);
+  });
+
+  it('drops students who signed out or went quiet', async () => {
+    await request(app).post('/api/auth/logout').set('Cookie', cookies[1]).expect(204);
+    await prisma.$executeRaw`UPDATE users SET last_seen_at = now() - interval '10 minutes' WHERE sr_code = ${SR[2]}`;
+    const left = (await online()).students.map((s) => s.srCode);
+    expect(left).toContain(SR[0]);
+    expect(left).not.toContain(SR[1]);
+    expect(left).not.toContain(SR[2]);
+  });
+
+  it('is for the teacher only', async () => {
+    expect((await request(app).get('/api/teacher/online').set(auth(tokens[0]))).status).toBe(403);
   });
 });

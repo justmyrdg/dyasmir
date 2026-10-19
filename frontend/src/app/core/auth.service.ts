@@ -50,6 +50,20 @@ export class AuthService {
     return this.refreshing$;
   }
 
+  /** Students only. The server ends every other session and answers with a new one for this browser. */
+  async changePassword(currentPassword: string, newPassword: string): Promise<void> {
+    const session = await firstValueFrom(
+      this.http.post<Session>('/api/account/password', { currentPassword, newPassword }, { withCredentials: true }),
+    );
+    this.apply(session);
+  }
+
+  /** The API answered PASSWORD_CHANGE_REQUIRED (e.g. the teacher reset the password): send them to choose one. */
+  passwordChangeRequired() {
+    this.user.update((u) => (u ? { ...u, mustChangePassword: true } : u));
+    void this.router.navigateByUrl('/student/password');
+  }
+
   async logout(): Promise<void> {
     try {
       await firstValueFrom(this.http.post('/api/auth/logout', {}, { withCredentials: true }));

@@ -5,3 +5,6 @@ dist/
 *.log
 .angular/
 coverage/
+
+# Filled-in student lists with passwords (never commit: the repo is public)
+private/

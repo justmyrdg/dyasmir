@@ -32,7 +32,7 @@ export function shortSubject(name: string): string {
       <div class="flex flex-wrap gap-2">
         <button
           class="btn-secondary"
-          title="SR codes, current passwords and emails of the students matching the filters below. Students added before passwords were saved have a blank password until you reset it."
+          title="SR codes, temporary passwords and emails of the students matching the filters below. The password is blank for students who chose their own (and for accounts added before passwords were saved) until you reset it."
           (click)="exportAccounts()"
         >
           Export accounts (CSV)
@@ -228,11 +228,21 @@ export function shortSubject(name: string): string {
                   </div>
                 </td>
                 <td>
-                  @if (s.isActive) {
-                    <span class="badge bg-emerald-100 text-emerald-800">Active</span>
-                  } @else {
-                    <span class="badge bg-slate-200 text-slate-700">Deactivated</span>
-                  }
+                  <div class="flex flex-col items-start gap-1">
+                    @if (s.isActive) {
+                      <span class="badge bg-emerald-100 text-emerald-800">Active</span>
+                    } @else {
+                      <span class="badge bg-slate-200 text-slate-700">Deactivated</span>
+                    }
+                    @if (s.mustChangePassword) {
+                      <span class="badge bg-amber-100 text-amber-800" title="Still has the password you gave them. They choose their own when they sign in."
+                        >Temporary password</span
+                      >
+                    }
+                  </div>
+                  <div class="mt-1 text-xs whitespace-nowrap text-slate-400">
+                    {{ s.lastLoginAt ? 'Signed in ' + fmt(s.lastLoginAt) : 'Never signed in' }}
+                  </div>
                 </td>
                 <td class="text-right whitespace-nowrap">
                   @if (s.email) {
@@ -455,7 +465,9 @@ export class StudentsPage implements OnInit {
   }
 
   protected async resetPassword(s: Student) {
-    const pw = prompt(`New password for ${s.name} (${s.srCode}), at least 6 characters:`);
+    const pw = prompt(
+      `New temporary password for ${s.name} (${s.srCode}), at least 6 characters. They will choose their own when they sign in:`,
+    );
     if (pw === null) return;
     if (pw.length < 6) {
       this.error.set('Password must be at least 6 characters.');
@@ -464,7 +476,10 @@ export class StudentsPage implements OnInit {
     this.reset();
     try {
       const res = await this.api.post<{ accountEmail: AccountEmailStatus }>(`/api/teacher/students/${s.id}/reset-password`, { password: pw });
-      this.message.set(`Password reset for ${s.name}. Any open sessions were signed out.` + this.emailNote(res.accountEmail, s.email));
+      this.message.set(
+        `Password reset for ${s.name}. Any open sessions were signed out, and they will choose a new password when they sign in.` +
+          this.emailNote(res.accountEmail, s.email),
+      );
     } catch (err) {
       this.error.set(errorMessage(err));
     }

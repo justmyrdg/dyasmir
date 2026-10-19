@@ -1,8 +1,10 @@
+import { Prisma } from '@prisma/client';
 import { isEmail } from 'class-validator';
 import { parse } from 'csv-parse/sync';
 import ExcelJS from 'exceljs';
+import { autoSubmitExpired } from '../attempts/grading';
 import { revokeAllForUser } from '../auth/auth.service';
-import { prisma, type Tx } from '../db';
+import { dbNow, prisma, type Tx } from '../db';
 import { decryptPassword, encryptPassword } from '../lib/credentials';
 import { safeCell, toCsv } from '../lib/csv';
 import { badRequest, conflict, HttpError, notFound } from '../lib/http-error';
@@ -27,6 +29,8 @@ const studentSelect = {
   isActive: true,
   createdAt: true,
   lockedUntil: true,
+  mustChangePassword: true,
+  lastLoginAt: true,
   section: { select: { name: true } },
   enrollments: {
     select: { subject: { select: { id: true, name: true } }, section: { select: { id: true, name: true } } },
@@ -43,6 +47,8 @@ type StudentRow = {
   isActive: boolean;
   createdAt: Date;
   lockedUntil: Date | null;
+  mustChangePassword: boolean;
+  lastLoginAt: Date | null;
   section: { name: string } | null;
   enrollments: { subject: { id: number; name: string }; section: { id: number; name: string } }[];
 };
@@ -61,6 +67,9 @@ const view = (s: StudentRow) => ({
   isActive: s.isActive,
   createdAt: s.createdAt,
   lockedUntil: s.lockedUntil,
+  /** Still has the password the teacher gave them (they must change it when they sign in). */
+  mustChangePassword: s.mustChangePassword,
+  lastLoginAt: s.lastLoginAt,
 });
 
 export interface StudentFilter {
@@ -86,11 +95,78 @@ export async function listStudents(filter: StudentFilter) {
   return students.map(view);
 }
 
+/** Open pages ping every minute; seen within this long and still signed in counts as online. */
+export const ONLINE_SECONDS = 150;
+
+const ONLINE_SQL = Prisma.sql`
+  u.role = 'student' AND u.is_active
+  AND u.last_seen_at > now() - interval '150 seconds'
+  AND EXISTS (SELECT 1 FROM refresh_tokens rt WHERE rt.user_id = u.id AND rt.revoked_at IS NULL AND rt.expires_at > now())`;
+
+/**
+ * The teacher's Online now page: students who are signed in (a session not signed out or expired) and were seen
+ * in the last 2.5 minutes, with the quiz each is taking, plus how many of each section's students are online.
+ */
+export async function onlineNow() {
+  await autoSubmitExpired();
+  const [students, sections, serverNow] = await Promise.all([
+    prisma.$queryRaw<
+      {
+        id: number;
+        sr_code: string;
+        name: string;
+        section: string | null;
+        seen_seconds_ago: number;
+        last_login_at: Date | null;
+        must_change_password: boolean;
+        attempt_id: number | null;
+        title: string | null;
+      }[]
+    >`
+      SELECT u.id, u.sr_code, u.name, sec.name AS section,
+             floor(extract(epoch FROM now() - u.last_seen_at))::int AS seen_seconds_ago,
+             u.last_login_at, u.must_change_password, cur.id AS attempt_id, cur.title
+      FROM users u
+      LEFT JOIN sections sec ON sec.id = u.section_id
+      LEFT JOIN LATERAL (
+        SELECT at.id, q.title FROM attempts at
+        JOIN assignments asg ON asg.id = at.assignment_id
+        JOIN quizzes q ON q.id = asg.quiz_id
+        WHERE at.student_id = u.id AND at.status = 'in_progress'
+        ORDER BY at.started_at DESC LIMIT 1
+      ) cur ON true
+      WHERE ${ONLINE_SQL}
+      ORDER BY sec.name, u.name`,
+    prisma.$queryRaw<{ section: string; students: number; online: number }[]>`
+      SELECT sec.name AS section, count(u.id)::int AS students, (count(u.id) FILTER (WHERE ${ONLINE_SQL}))::int AS online
+      FROM sections sec
+      LEFT JOIN users u ON u.section_id = sec.id AND u.role = 'student' AND u.is_active
+      GROUP BY sec.id, sec.name
+      ORDER BY sec.name`,
+    dbNow(),
+  ]);
+  return {
+    serverNow,
+    onlineSeconds: ONLINE_SECONDS,
+    sections,
+    students: students.map((s) => ({
+      id: s.id,
+      srCode: s.sr_code,
+      name: s.name,
+      section: s.section,
+      seenSecondsAgo: s.seen_seconds_ago,
+      lastLoginAt: s.last_login_at,
+      mustChangePassword: s.must_change_password,
+      taking: s.attempt_id === null ? null : { attemptId: s.attempt_id, title: s.title! },
+    })),
+  };
+}
+
 /**
  * The students' accounts with their current passwords, as CSV in the import template's columns
  * (SR code, Name, Password, Email, one column per subject with the section it is taken in), so the file can be
- * handed out or imported again. Accounts whose password was set before passwords were kept readable have
- * an empty Password cell until the teacher resets it.
+ * handed out or imported again. The Password cell is empty for students who chose their own password (and for
+ * accounts from before passwords were kept readable) until the teacher resets it.
  */
 export async function exportAccountsCsv(filter: StudentFilter): Promise<string> {
   const subjects = await prisma.subject.findMany({ orderBy: { name: 'asc' } });
@@ -176,6 +252,7 @@ export async function createStudent(dto: CreateStudentDto) {
       sectionId: dto.sectionId,
       passwordHash: await hashPassword(dto.password),
       passwordEncrypted: encryptPassword(dto.password),
+      mustChangePassword: true,
       enrollments: { create: enrollments },
     },
     select: studentSelect,
@@ -230,12 +307,21 @@ export async function updateStudent(id: number, dto: UpdateStudentDto) {
   return view(student);
 }
 
-/** Sets a new password, signs the student out everywhere, and emails them the new one if they have an address. */
+/**
+ * Sets a new temporary password (the student must change it when they sign in), signs them out everywhere, and
+ * emails them the new one if they have an address.
+ */
 export async function resetPassword(id: number, password: string) {
   await getStudentOr404(id);
   await prisma.user.update({
     where: { id },
-    data: { passwordHash: await hashPassword(password), passwordEncrypted: encryptPassword(password), failedLoginCount: 0, lockedUntil: null },
+    data: {
+      passwordHash: await hashPassword(password),
+      passwordEncrypted: encryptPassword(password),
+      mustChangePassword: true,
+      failedLoginCount: 0,
+      lockedUntil: null,
+    },
   });
   await revokeAllForUser(id);
   return { accountEmail: await sendAccountEmail(id) };
@@ -463,6 +549,7 @@ export async function importStudents(input: { csv?: string; xlsxBase64?: string 
             sectionId: s.sectionId,
             passwordHash: s.passwordHash,
             passwordEncrypted: encryptPassword(s.password),
+            mustChangePassword: true,
             enrollments: { create: s.enrollments },
           },
           select: { id: true },

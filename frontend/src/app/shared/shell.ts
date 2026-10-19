@@ -1,9 +1,13 @@
+import { HttpClient } from '@angular/common/http';
 import { Component, computed, DestroyRef, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRouteSnapshot, NavigationEnd, Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
-import { filter } from 'rxjs';
+import { filter, interval } from 'rxjs';
 import { APP_NAME } from '../core/app-title';
 import { AuthService } from '../core/auth.service';
+
+/** How often student pages say "still here" (the server counts 150 s without one as offline). */
+const PING_MS = 60_000;
 
 interface Crumb {
   label: string;
@@ -42,6 +46,13 @@ interface Crumb {
             }
           </div>
         </div>
+        @if (!isTeacher() && !auth.user()?.mustChangePassword) {
+          <a
+            routerLink="/student/password"
+            class="rounded-full px-3 py-1 text-xs font-semibold text-white/80 hover:bg-white/10 hover:text-white"
+            >Change password</a
+          >
+        }
         <button
           type="button"
           class="rounded-full border border-white/40 px-3 py-1 text-xs font-semibold text-white hover:border-white hover:bg-white/10"
@@ -109,6 +120,7 @@ interface Crumb {
 export class Shell {
   protected readonly auth = inject(AuthService);
   private readonly router = inject(Router);
+  private readonly http = inject(HttpClient);
   protected readonly appName = APP_NAME;
   protected readonly navOpen = signal(false);
   protected readonly crumbs = signal<Crumb[]>([]);
@@ -116,19 +128,28 @@ export class Shell {
   protected readonly home = computed(() => this.auth.homeFor(this.auth.user()?.role));
   protected readonly teacherLinks = [
     { path: '/teacher', label: 'Dashboard', exact: true },
+    { path: '/teacher/online', label: 'Online now', exact: false },
     { path: '/teacher/quizzes', label: 'Quizzes', exact: false },
     { path: '/teacher/results', label: 'Results', exact: false },
     { path: '/teacher/students', label: 'Students', exact: false },
   ];
 
   constructor() {
+    const destroyRef = inject(DestroyRef);
     this.crumbs.set(this.buildCrumbs());
     this.router.events
       .pipe(
         filter((e) => e instanceof NavigationEnd),
-        takeUntilDestroyed(inject(DestroyRef)),
+        takeUntilDestroyed(destroyRef),
       )
       .subscribe(() => this.crumbs.set(this.buildCrumbs()));
+
+    // Tells the teacher's Online now page this student still has the site open (pages may sit idle for long).
+    if (!this.isTeacher()) {
+      interval(PING_MS)
+        .pipe(takeUntilDestroyed(destroyRef))
+        .subscribe(() => this.http.post('/api/account/ping', {}).subscribe({ error: () => undefined }));
+    }
   }
 
   /** Home › (parent from route data) › current page title. */

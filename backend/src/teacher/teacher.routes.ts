@@ -38,6 +38,11 @@ teacherRouter.get('/dashboard', async (_req, res) => {
   res.json(await reports.dashboard());
 });
 
+/** Students signed in and active in the last few minutes, with the quiz each is taking. */
+teacherRouter.get('/online', async (_req, res) => {
+  res.json(await students.onlineNow());
+});
+
 function resultsFilter(query: Record<string, unknown>): reports.ResultsFilter {
   return {
     sectionId: optionalIntQuery(query.sectionId, 'sectionId'),

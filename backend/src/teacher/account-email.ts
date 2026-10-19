@@ -40,8 +40,8 @@ function accountEmailText(a: AccountEmail): string {
 }
 
 /**
- * Emails one student their SR code, current password and subjects. An account whose password was set before
- * passwords were kept readable gets a new random password first (reported as newPassword).
+ * Emails one student their SR code, current password and subjects. A student who chose their own password (or
+ * an account from before passwords were kept readable) gets a new temporary one first (reported as newPassword).
  */
 export async function sendAccountEmail(studentId: number): Promise<AccountEmailStatus> {
   const s = await prisma.user.findUnique({
@@ -65,7 +65,13 @@ export async function sendAccountEmail(studentId: number): Promise<AccountEmailS
     newPassword = true;
     await prisma.user.update({
       where: { id: s.id },
-      data: { passwordHash: await hashPassword(password), passwordEncrypted: encryptPassword(password), failedLoginCount: 0, lockedUntil: null },
+      data: {
+        passwordHash: await hashPassword(password),
+        passwordEncrypted: encryptPassword(password),
+        mustChangePassword: true,
+        failedLoginCount: 0,
+        lockedUntil: null,
+      },
     });
     await revokeAllForUser(s.id);
   }

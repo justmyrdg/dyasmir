@@ -7,6 +7,7 @@ import cors from 'cors';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import helmet from 'helmet';
 import { attemptsRouter, studentRouter } from './attempts/student.routes';
+import { accountRouter } from './auth/account.routes';
 import { authRouter } from './auth/auth.routes';
 import { config } from './config';
 import { HttpError } from './lib/http-error';
@@ -33,6 +34,7 @@ export function createApp() {
   });
 
   app.use('/api/auth', authRouter);
+  app.use('/api/account', accountRouter);
   app.use('/api/teacher', teacherRouter);
   app.use('/api/student', studentRouter);
   app.use('/api/attempts', attemptsRouter);

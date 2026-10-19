@@ -1,7 +1,7 @@
 import { config } from '../config';
 import { prisma } from '../db';
-import { HttpError, unauthorized } from '../lib/http-error';
-import { DUMMY_HASH, verifyPassword } from '../lib/passwords';
+import { badRequest, forbidden, HttpError, unauthorized } from '../lib/http-error';
+import { DUMMY_HASH, hashPassword, verifyPassword } from '../lib/passwords';
 import type { LoginDto } from './auth.dto';
 import type { AuthUser, Role } from './auth.types';
 import { hashRefreshToken, newRefreshToken, signAccessToken } from './tokens';
@@ -26,6 +26,7 @@ const userSelect = {
   email: true,
   sectionId: true,
   isActive: true,
+  mustChangePassword: true,
   section: { select: { name: true } },
 } as const;
 
@@ -36,6 +37,7 @@ type SelectedUser = {
   srCode: string | null;
   email: string | null;
   sectionId: number | null;
+  mustChangePassword: boolean;
   section: { name: string } | null;
 };
 
@@ -48,6 +50,7 @@ export function toAuthUser(u: SelectedUser): AuthUser {
     email: u.email,
     sectionId: u.sectionId,
     sectionName: u.section?.name ?? null,
+    mustChangePassword: u.mustChangePassword,
   };
 }
 
@@ -107,7 +110,8 @@ export async function login(dto: LoginDto): Promise<Session> {
 
   if (!user.isActive) throw new HttpError(403, 'This account has been deactivated. Ask your teacher.', 'ACCOUNT_INACTIVE');
 
-  await prisma.user.update({ where: { id: user.id }, data: { failedLoginCount: 0, lockedUntil: null } });
+  await prisma.$executeRaw`
+    UPDATE users SET failed_login_count = 0, locked_until = NULL, last_login_at = now(), last_seen_at = now() WHERE id = ${user.id}`;
   return issueSession(toAuthUser(user));
 }
 
@@ -154,6 +158,43 @@ export async function logout(token: string | undefined): Promise<void> {
     UPDATE refresh_tokens SET revoked_at = now() WHERE token_hash = ${hashRefreshToken(token)} AND revoked_at IS NULL`;
 }
 
+/**
+ * Ends every session of the user (password changed or reset, account deactivated, stolen token). The revocation
+ * is back-dated past REUSE_GRACE_SECONDS, so the grace for concurrent refreshes in refresh() does not let one of
+ * these tokens get a new access token.
+ */
 export async function revokeAllForUser(userId: number): Promise<void> {
-  await prisma.$executeRaw`UPDATE refresh_tokens SET revoked_at = now() WHERE user_id = ${userId} AND revoked_at IS NULL`;
+  await prisma.$executeRaw`
+    UPDATE refresh_tokens SET revoked_at = now() - make_interval(secs => ${REUSE_GRACE_SECONDS + 1}::int)
+    WHERE user_id = ${userId} AND revoked_at IS NULL`;
+}
+
+/** "Last seen" for the teacher's Online now page. Written at most every 30 s, so most requests change nothing. */
+export async function touchLastSeen(userId: number): Promise<void> {
+  await prisma.$executeRaw`
+    UPDATE users SET last_seen_at = now()
+    WHERE id = ${userId} AND (last_seen_at IS NULL OR last_seen_at < now() - interval '30 seconds')`;
+}
+
+/**
+ * A student replaces their password, usually the temporary one the teacher gave them. Every session ends (someone
+ * else may know the old password) and the caller gets a new one. The new password is not kept readable, so the
+ * teacher can no longer see or export it; resetting it gives the student a new temporary one.
+ */
+export async function changePassword(userId: number, currentPassword: string, newPassword: string): Promise<Session> {
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { ...userSelect, passwordHash: true } });
+  if (!user || !user.isActive) throw unauthorized('Account not found or deactivated');
+  if (user.role !== 'student') throw forbidden("The teacher's password is set on the server (TEACHER_PASSWORD or create-teacher).");
+  // 400, not 401: a 401 makes the app think the session expired.
+  if (!(await verifyPassword(currentPassword, user.passwordHash))) throw new HttpError(400, 'Your current password is wrong.', 'WRONG_PASSWORD');
+  if (newPassword === currentPassword) throw badRequest('Choose a new password, not the one you have now.');
+  const sr = user.srCode ?? '';
+  if (sr && [sr, sr.replace('-', '')].some((s) => newPassword.includes(s))) throw badRequest("Don't put your SR code in your password.");
+
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { passwordHash: await hashPassword(newPassword), passwordEncrypted: null, mustChangePassword: false, failedLoginCount: 0, lockedUntil: null },
+  });
+  await revokeAllForUser(user.id);
+  return issueSession({ ...toAuthUser(user), mustChangePassword: false });
 }

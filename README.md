@@ -16,9 +16,12 @@ quiz/
 │   │   ├── migrations/         SQL incl. CHECK constraints, triggers, sections, subjects, student_subjects
 │   │   └── seed.ts             reference data (idempotent)
 │   ├── data/quizzes.sample.json  two 30-point quizzes (20 MC + 10 identification), the import format
+│   ├── data/seed/              gitignored: teacher.json + quiz files that bootstrap loads on every deploy
 │   ├── scripts/
 │   │   ├── create-teacher.ts   CLI: create the teacher account
-│   │   └── seed-quizzes.ts     CLI: load quizzes from a JSON file
+│   │   ├── seed-quizzes.ts     CLI: load quizzes from a JSON file
+│   │   ├── export-quizzes.ts   CLI: write every quiz in the database to data/seed/quizzes.json
+│   │   └── bootstrap.ts        CLI: create the teacher and load the quizzes in data/seed/ (run by the deploy)
 │   ├── src/
 │   │   ├── auth/               login, refresh, logout, lockout, JWT middleware, role guard
 │   │   ├── attempts/           student endpoints, start/resume/autosave/submit, grading, auto-submit job
@@ -84,6 +87,16 @@ npm run seed:quizzes -- data/quizzes.sample.json --strict
 ```
 
 To load your own file, replace `data/quizzes.sample.json` with your path. The format is in [Quiz JSON format](#quiz-json-format). Quizzes can also be imported from the teacher UI (**Quizzes → Import quiz JSON**).
+
+**Seed data for deploys.** `backend/data/seed/` is gitignored, so answer keys and the password never reach the repository, but it goes to the server with the project folder. The deploy runs `bootstrap`, which loads it:
+
+```bash
+npm run export:quizzes   # every quiz in this database -> data/seed/quizzes.json (answer keys included)
+npm run bootstrap        # data/seed/teacher.json {"email","name","password"}: create that teacher if missing
+                         # every other data/seed/*.json: load its quizzes, skipping titles already in the subject
+```
+
+Running `bootstrap` again changes nothing. It never changes an existing account's password (use `create-teacher` for that) and never overwrites an existing quiz. To update a quiz that's already on the server, edit it in the teacher UI there.
 
 ### 1.5 Run the backend and frontend
 
@@ -238,7 +251,7 @@ Serve the frontend and the API from **one origin over HTTPS**. The refresh cooki
    ```bash
    sudo bash deploy/setup-ec2.sh quiz.yourschool.edu
    ```
-   At the end it prints the commands for creating the teacher account and loading quizzes.
+   It also runs `bootstrap`, so the teacher account and quizzes in `backend/data/seed/` are there on the first deploy (see [1.4](#14-load-the-quizzes)). Without `data/seed/teacher.json`, create the teacher with the command it prints at the end.
 
 **Updating:** copy the new code over the same folder and run the same command again. It rebuilds, applies new migrations and restarts. The site is down for a moment while it restarts, so don't update during an exam.
 
@@ -266,6 +279,8 @@ Serve the frontend and the API from **one origin over HTTPS**. The refresh cooki
    - **Nginx:** serve `frontend/dist/frontend/browser` as static files with `try_files $uri /index.html;` and proxy `/api/` to `http://127.0.0.1:3000`.
    - **Docker:** `backend/Dockerfile` builds the API image and runs `prisma migrate deploy` on start.
 5. **First run:** `node dist/scripts/create-teacher.js --email ... --name ...`, then load quizzes with `node dist/scripts/seed-quizzes.js your-quizzes.json`.
+
+   **No shell on the host (Render)?** Set `TEACHER_EMAIL`, `TEACHER_NAME` and `TEACHER_PASSWORD` in the service's environment variables. Each time the server starts, it creates that teacher account if it's missing. To reset the password, change `TEACHER_PASSWORD` and redeploy. Then sign in and load the quizzes with **Quizzes → Import quiz JSON**, choosing `backend/data/seed/quizzes.json` from `npm run export:quizzes`. Import a file only once: importing it again adds a second copy of each quiz. The start command must still run `npx prisma migrate deploy` first (the Dockerfile's does).
 
 **Notes**
 - Several API instances are safe. The auto-submit job locks each attempt row and re-checks its status, so an attempt is never graded twice.

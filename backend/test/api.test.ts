@@ -5,6 +5,7 @@ import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app';
 import { autoSubmitExpired } from '../src/attempts/grading';
+import { ensureTeacher } from '../src/auth/teacher-account';
 import { prisma } from '../src/db';
 import { hashPassword } from '../src/lib/passwords';
 
@@ -1183,5 +1184,38 @@ describe('account emails', () => {
     expect((await patch('Mail.Four@Example.com')).body.email).toBe('mail.four@example.com');
     expect((await patch('mail.two@example.com')).status).toBe(409);
     expect((await patch(null)).body.email).toBeNull();
+  });
+});
+
+describe('teacher account from TEACHER_EMAIL / TEACHER_PASSWORD (hosts with no shell)', () => {
+  const email = 'env.teacher@test.local';
+
+  it('creates the account, then leaves it alone while the values match', async () => {
+    expect(await ensureTeacher({ email: ' Env.Teacher@Test.local ', name: 'Env Teacher', password: 'first-pass1' }, { reset: true })).toBe('created');
+    expect((await login({ email, password: 'first-pass1' })).body.user).toMatchObject({ role: 'teacher', name: 'Env Teacher' });
+    expect(await ensureTeacher({ email, name: 'Env Teacher', password: 'first-pass1' }, { reset: true })).toBe('unchanged');
+  });
+
+  it('a new password resets it and clears a lockout', async () => {
+    await prisma.$executeRaw`UPDATE users SET failed_login_count = 5, locked_until = now() + interval '1 hour' WHERE email = ${email}`;
+    expect(await ensureTeacher({ email, name: 'Env Teacher', password: 'second-pass2' }, { reset: true })).toBe('updated');
+    expect((await login({ email, password: 'second-pass2' })).status).toBe(200);
+    expect((await login({ email, password: 'first-pass1' })).status).toBe(401);
+  });
+
+  it('without reset (bootstrap teacher.json) an existing account keeps its password', async () => {
+    expect(await ensureTeacher({ email, name: 'Env Teacher', password: 'third-pass3' })).toBe('unchanged');
+    expect((await login({ email, password: 'second-pass2' })).status).toBe(200);
+  });
+
+  it("refuses a student's email, a bad email or password, and a new account with no name", async () => {
+    await prisma.user.create({
+      data: { role: 'student', srCode: '23-70001', name: 'Env Student', email: 'env.student@test.local', sectionId: sectionA, passwordHash: await hashPassword(PW) },
+    });
+    await expect(ensureTeacher({ email: 'env.student@test.local', name: 'X', password: 'long-enough1' }, { reset: true })).rejects.toThrow(/not a teacher/);
+    await expect(ensureTeacher({ email: 'not-an-email', name: 'X', password: 'long-enough1' })).rejects.toThrow(/valid email/);
+    await expect(ensureTeacher({ email: 'new.teacher@test.local', name: 'X', password: 'short' })).rejects.toThrow(/8-72/);
+    await expect(ensureTeacher({ email: 'new.teacher@test.local', password: 'long-enough1' })).rejects.toThrow(/name/);
+    expect(await prisma.user.findUnique({ where: { email: 'new.teacher@test.local' } })).toBeNull();
   });
 });

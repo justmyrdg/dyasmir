@@ -39,6 +39,10 @@ export const config = {
   loginLockMinutes: int('LOGIN_LOCK_MINUTES', 5),
   frontendDistDir: process.env.FRONTEND_DIST_DIR || undefined,
   enableAutoSubmitJob: process.env.DISABLE_AUTO_SUBMIT_JOB !== 'true',
+  /** Optional, for hosts with no shell (Render): the teacher the server creates, or resets the password of, on start. */
+  teacher: process.env.TEACHER_EMAIL
+    ? { email: process.env.TEACHER_EMAIL, name: process.env.TEACHER_NAME || undefined, password: process.env.TEACHER_PASSWORD ?? '' }
+    : undefined,
   /** Account emails to students. Leave SMTP_HOST empty to turn them off. */
   smtp: {
     host: process.env.SMTP_HOST || undefined,

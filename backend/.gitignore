@@ -4,3 +4,5 @@ dist
 .env.test
 coverage
 *.log
+# Private seed data loaded by scripts/bootstrap.ts on deploy (answer keys, teacher password)
+data/seed/

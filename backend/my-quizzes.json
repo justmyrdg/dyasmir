@@ -1,0 +1,1757 @@
+{
+  "quizzes": [
+    {
+      "subject": "Database Design",
+      "title": "Database Design - Quiz 1: Relational Model, Keys and Normalization",
+      "timeLimitMinutes": 45,
+      "shuffleQuestions": true,
+      "shuffleChoices": true,
+      "showResultsToStudents": false,
+      "secureMode": true,
+      "maxViolations": 5,
+      "questions": [
+        {
+          "type": "multiple_choice",
+          "text": "Which key uniquely identifies each row in a table?",
+          "points": 1,
+          "choices": [
+            "Foreign key",
+            "Primary key",
+            "Composite attribute",
+            "Candidate index"
+          ],
+          "answer": 1
+        },
+        {
+          "type": "multiple_choice",
+          "text": "A foreign key is used to:",
+          "points": 1,
+          "choices": [
+            "Encrypt a column",
+            "Speed up full table scans",
+            "Reference the primary key of another (or the same) table",
+            "Store derived values"
+          ],
+          "answer": 2
+        },
+        {
+          "type": "multiple_choice",
+          "text": "In an ER diagram, a rectangle usually represents a(n):",
+          "points": 1,
+          "choices": [
+            "Entity",
+            "Attribute",
+            "Relationship",
+            "Cardinality"
+          ],
+          "answer": 0
+        },
+        {
+          "type": "multiple_choice",
+          "text": "A table is in First Normal Form (1NF) when:",
+          "points": 1,
+          "choices": [
+            "It has no foreign keys",
+            "Every attribute holds atomic (single) values and there are no repeating groups",
+            "It has no transitive dependencies",
+            "Every determinant is a candidate key"
+          ],
+          "answer": 1
+        },
+        {
+          "type": "multiple_choice",
+          "text": "Second Normal Form (2NF) removes:",
+          "points": 1,
+          "choices": [
+            "Multivalued dependencies",
+            "Transitive dependencies",
+            "Partial dependencies on part of a composite key",
+            "Join dependencies"
+          ],
+          "answer": 2
+        },
+        {
+          "type": "multiple_choice",
+          "text": "Third Normal Form (3NF) removes:",
+          "points": 1,
+          "choices": [
+            "Transitive dependencies of non-key attributes on the key",
+            "Repeating groups",
+            "All NULL values",
+            "Composite keys"
+          ],
+          "answer": 0
+        },
+        {
+          "type": "multiple_choice",
+          "text": "Which SQL statement removes rows from a table but keeps the table?",
+          "points": 1,
+          "choices": [
+            "DROP",
+            "DELETE",
+            "ALTER",
+            "REVOKE"
+          ],
+          "answer": 1
+        },
+        {
+          "type": "multiple_choice",
+          "text": "Which SQL category does CREATE TABLE belong to?",
+          "points": 1,
+          "choices": [
+            "DML",
+            "DCL",
+            "DDL",
+            "TCL"
+          ],
+          "answer": 2
+        },
+        {
+          "type": "multiple_choice",
+          "text": "The cardinality between STUDENT and COURSE where a student takes many courses and a course has many students is:",
+          "points": 1,
+          "choices": [
+            "One-to-one",
+            "One-to-many",
+            "Many-to-one",
+            "Many-to-many"
+          ],
+          "answer": 3
+        },
+        {
+          "type": "multiple_choice",
+          "text": "A many-to-many relationship is implemented in a relational database using:",
+          "points": 1,
+          "choices": [
+            "A single foreign key",
+            "An associative (junction) table",
+            "A view",
+            "A trigger"
+          ],
+          "answer": 1
+        },
+        {
+          "type": "multiple_choice",
+          "text": "Which constraint prevents a column from accepting NULL values?",
+          "points": 1,
+          "choices": [
+            "UNIQUE",
+            "CHECK",
+            "NOT NULL",
+            "DEFAULT"
+          ],
+          "answer": 2
+        },
+        {
+          "type": "multiple_choice",
+          "text": "Referential integrity ensures that:",
+          "points": 1,
+          "choices": [
+            "Every foreign key value matches an existing primary key value or is NULL",
+            "Every table has an index",
+            "Passwords are hashed",
+            "Queries run in parallel"
+          ],
+          "answer": 0
+        },
+        {
+          "type": "multiple_choice",
+          "text": "A minimal set of attributes that can uniquely identify a row is called a:",
+          "points": 1,
+          "choices": [
+            "Super key",
+            "Candidate key",
+            "Foreign key",
+            "Surrogate attribute"
+          ],
+          "answer": 1
+        },
+        {
+          "type": "multiple_choice",
+          "text": "Which JOIN returns only rows with matching values in both tables?",
+          "points": 1,
+          "choices": [
+            "LEFT JOIN",
+            "RIGHT JOIN",
+            "FULL OUTER JOIN",
+            "INNER JOIN"
+          ],
+          "answer": 3
+        },
+        {
+          "type": "multiple_choice",
+          "text": "The 'I' in ACID stands for:",
+          "points": 1,
+          "choices": [
+            "Integrity",
+            "Isolation",
+            "Indexing",
+            "Identity"
+          ],
+          "answer": 1
+        },
+        {
+          "type": "multiple_choice",
+          "text": "An attribute that can be computed from other attributes (e.g., age from birth date) is a:",
+          "points": 1,
+          "choices": [
+            "Derived attribute",
+            "Composite attribute",
+            "Multivalued attribute",
+            "Key attribute"
+          ],
+          "answer": 0
+        },
+        {
+          "type": "multiple_choice",
+          "text": "A weak entity is one that:",
+          "points": 1,
+          "choices": [
+            "Has no attributes",
+            "Cannot be identified by its own attributes alone and depends on an owner entity",
+            "Has only one row",
+            "Is never stored"
+          ],
+          "answer": 1
+        },
+        {
+          "type": "multiple_choice",
+          "text": "Which clause filters groups after aggregation?",
+          "points": 1,
+          "choices": [
+            "WHERE",
+            "ORDER BY",
+            "HAVING",
+            "FROM"
+          ],
+          "answer": 2
+        },
+        {
+          "type": "multiple_choice",
+          "text": "A key made of two or more columns is called a:",
+          "points": 1,
+          "choices": [
+            "Composite key",
+            "Surrogate key",
+            "Natural key",
+            "Alternate key"
+          ],
+          "answer": 0
+        },
+        {
+          "type": "multiple_choice",
+          "text": "Which is the main purpose of normalization?",
+          "points": 1,
+          "choices": [
+            "To make queries always faster",
+            "To reduce redundancy and update anomalies",
+            "To encrypt data",
+            "To add more tables for security"
+          ],
+          "answer": 1
+        },
+        {
+          "type": "identification",
+          "text": "What do you call a database object that stores data in rows and columns?",
+          "points": 1,
+          "acceptedAnswers": [
+            "table",
+            "relation"
+          ]
+        },
+        {
+          "type": "identification",
+          "text": "What is the term for a column or set of columns in one table that refers to the primary key of another table?",
+          "points": 1,
+          "acceptedAnswers": [
+            "foreign key",
+            "fk"
+          ]
+        },
+        {
+          "type": "identification",
+          "text": "Give the acronym for the diagram used to model entities and their relationships.",
+          "points": 1,
+          "acceptedAnswers": [
+            "ERD",
+            "ER diagram",
+            "entity relationship diagram",
+            "entity-relationship diagram"
+          ]
+        },
+        {
+          "type": "identification",
+          "text": "What SQL keyword removes duplicate rows from a query result?",
+          "points": 1,
+          "acceptedAnswers": [
+            "DISTINCT"
+          ]
+        },
+        {
+          "type": "identification",
+          "text": "What normal form requires that every determinant be a candidate key?",
+          "points": 1,
+          "acceptedAnswers": [
+            "BCNF",
+            "Boyce-Codd Normal Form",
+            "Boyce Codd Normal Form"
+          ]
+        },
+        {
+          "type": "identification",
+          "text": "What SQL command makes all changes in the current transaction permanent?",
+          "points": 1,
+          "acceptedAnswers": [
+            "COMMIT"
+          ]
+        },
+        {
+          "type": "identification",
+          "text": "What is the name of a virtual table defined by a stored query?",
+          "points": 1,
+          "acceptedAnswers": [
+            "view"
+          ]
+        },
+        {
+          "type": "identification",
+          "text": "What do you call a problem where updating one copy of redundant data leaves other copies inconsistent?",
+          "points": 1,
+          "acceptedAnswers": [
+            "update anomaly",
+            "modification anomaly"
+          ]
+        },
+        {
+          "type": "identification",
+          "text": "What SQL aggregate function returns the number of rows?",
+          "points": 1,
+          "acceptedAnswers": [
+            "COUNT",
+            "COUNT()",
+            "COUNT(*)"
+          ]
+        },
+        {
+          "type": "identification",
+          "text": "What database structure speeds up lookups on a column at the cost of extra storage and slower writes?",
+          "points": 1,
+          "acceptedAnswers": [
+            "index"
+          ]
+        }
+      ]
+    },
+    {
+      "subject": "Embedded Systems (CpET343)",
+      "title": "Embedded Systems (CpET343) - Quiz 1: Microcontrollers and I/O",
+      "timeLimitMinutes": 45,
+      "shuffleQuestions": true,
+      "shuffleChoices": true,
+      "showResultsToStudents": false,
+      "secureMode": true,
+      "maxViolations": 5,
+      "questions": [
+        {
+          "type": "multiple_choice",
+          "text": "An embedded system is best described as:",
+          "points": 1,
+          "choices": [
+            "A general-purpose desktop computer",
+            "A computer system designed to perform a dedicated function within a larger system",
+            "A cloud server",
+            "A programming language"
+          ],
+          "answer": 1
+        },
+        {
+          "type": "multiple_choice",
+          "text": "Compared to a microprocessor, a microcontroller typically includes:",
+          "points": 1,
+          "choices": [
+            "Only an ALU",
+            "CPU, memory and peripherals on a single chip",
+            "A dedicated graphics card",
+            "No on-chip memory"
+          ],
+          "answer": 1
+        },
+        {
+          "type": "multiple_choice",
+          "text": "Which memory keeps its contents when power is removed?",
+          "points": 1,
+          "choices": [
+            "SRAM",
+            "DRAM",
+            "Flash",
+            "CPU registers"
+          ],
+          "answer": 2
+        },
+        {
+          "type": "multiple_choice",
+          "text": "The Harvard architecture uses:",
+          "points": 1,
+          "choices": [
+            "One shared bus for instructions and data",
+            "Separate memories/buses for instructions and data",
+            "No memory bus",
+            "Only analog signals"
+          ],
+          "answer": 1
+        },
+        {
+          "type": "multiple_choice",
+          "text": "GPIO stands for:",
+          "points": 1,
+          "choices": [
+            "General Purpose Input/Output",
+            "Graphics Processing I/O",
+            "Ground Power Input/Output",
+            "Generic Port Interface Operation"
+          ],
+          "answer": 0
+        },
+        {
+          "type": "multiple_choice",
+          "text": "A pull-up resistor on an input pin ensures that the pin:",
+          "points": 1,
+          "choices": [
+            "Reads LOW when nothing is connected",
+            "Reads HIGH when nothing is connected",
+            "Outputs PWM",
+            "Draws maximum current"
+          ],
+          "answer": 1
+        },
+        {
+          "type": "multiple_choice",
+          "text": "PWM is commonly used to:",
+          "points": 1,
+          "choices": [
+            "Store data permanently",
+            "Control the average power to a load such as LED brightness or motor speed",
+            "Convert digital to text",
+            "Measure temperature directly"
+          ],
+          "answer": 1
+        },
+        {
+          "type": "multiple_choice",
+          "text": "The duty cycle of a PWM signal that is HIGH for 2 ms out of a 10 ms period is:",
+          "points": 1,
+          "choices": [
+            "10%",
+            "20%",
+            "50%",
+            "80%"
+          ],
+          "answer": 1
+        },
+        {
+          "type": "multiple_choice",
+          "text": "An ADC converts:",
+          "points": 1,
+          "choices": [
+            "Digital values to analog voltages",
+            "Analog voltages to digital values",
+            "AC to DC",
+            "Serial to parallel data"
+          ],
+          "answer": 1
+        },
+        {
+          "type": "multiple_choice",
+          "text": "A 10-bit ADC can represent how many discrete levels?",
+          "points": 1,
+          "choices": [
+            "256",
+            "512",
+            "1024",
+            "4096"
+          ],
+          "answer": 2
+        },
+        {
+          "type": "multiple_choice",
+          "text": "Which serial protocol uses SDA and SCL lines?",
+          "points": 1,
+          "choices": [
+            "SPI",
+            "UART",
+            "I2C",
+            "CAN"
+          ],
+          "answer": 2
+        },
+        {
+          "type": "multiple_choice",
+          "text": "Which serial protocol uses MOSI, MISO, SCK and SS/CS lines?",
+          "points": 1,
+          "choices": [
+            "I2C",
+            "SPI",
+            "UART",
+            "1-Wire"
+          ],
+          "answer": 1
+        },
+        {
+          "type": "multiple_choice",
+          "text": "UART communication is:",
+          "points": 1,
+          "choices": [
+            "Synchronous with a shared clock line",
+            "Asynchronous, using an agreed baud rate",
+            "Parallel only",
+            "Wireless only"
+          ],
+          "answer": 1
+        },
+        {
+          "type": "multiple_choice",
+          "text": "An interrupt allows a microcontroller to:",
+          "points": 1,
+          "choices": [
+            "Respond to an event immediately by running an ISR",
+            "Increase its clock speed",
+            "Erase flash memory",
+            "Disable all peripherals permanently"
+          ],
+          "answer": 0
+        },
+        {
+          "type": "multiple_choice",
+          "text": "Polling means the program:",
+          "points": 1,
+          "choices": [
+            "Waits for hardware to signal it with an interrupt",
+            "Repeatedly checks the status of a device in a loop",
+            "Sleeps forever",
+            "Uses DMA only"
+          ],
+          "answer": 1
+        },
+        {
+          "type": "multiple_choice",
+          "text": "A watchdog timer is used to:",
+          "points": 1,
+          "choices": [
+            "Measure room temperature",
+            "Reset the system if the software stops responding",
+            "Generate audio",
+            "Count button presses only"
+          ],
+          "answer": 1
+        },
+        {
+          "type": "multiple_choice",
+          "text": "Switch bouncing is best handled by:",
+          "points": 1,
+          "choices": [
+            "Increasing the supply voltage",
+            "Debouncing in hardware (RC filter) or software (delay/sampling)",
+            "Removing the pull-up resistor",
+            "Using a faster clock"
+          ],
+          "answer": 1
+        },
+        {
+          "type": "multiple_choice",
+          "text": "In C for embedded systems, the 'volatile' keyword tells the compiler that a variable:",
+          "points": 1,
+          "choices": [
+            "Is constant",
+            "May change outside the normal program flow (e.g., by an ISR or hardware), so do not optimize away accesses",
+            "Is stored in flash",
+            "Is a pointer"
+          ],
+          "answer": 1
+        },
+        {
+          "type": "multiple_choice",
+          "text": "A Real-Time Operating System (RTOS) is mainly valued for:",
+          "points": 1,
+          "choices": [
+            "Fancy graphics",
+            "Deterministic, predictable timing of tasks",
+            "Large file systems",
+            "Running only one task ever"
+          ],
+          "answer": 1
+        },
+        {
+          "type": "multiple_choice",
+          "text": "To toggle bit 3 of register PORTB in C, you would write:",
+          "points": 1,
+          "choices": [
+            "PORTB |= (1 << 3);",
+            "PORTB &= ~(1 << 3);",
+            "PORTB ^= (1 << 3);",
+            "PORTB = 3;"
+          ],
+          "answer": 2
+        },
+        {
+          "type": "identification",
+          "text": "What do you call the function that runs automatically when an interrupt occurs? (acronym)",
+          "points": 1,
+          "acceptedAnswers": [
+            "ISR",
+            "interrupt service routine",
+            "interrupt handler"
+          ]
+        },
+        {
+          "type": "identification",
+          "text": "What is the term for the number of symbols (bits) per second transmitted in UART communication?",
+          "points": 1,
+          "acceptedAnswers": [
+            "baud rate",
+            "baud"
+          ]
+        },
+        {
+          "type": "identification",
+          "text": "What device converts a digital value into an analog voltage? (acronym)",
+          "points": 1,
+          "acceptedAnswers": [
+            "DAC",
+            "digital-to-analog converter",
+            "digital to analog converter"
+          ]
+        },
+        {
+          "type": "identification",
+          "text": "What is the percentage of time a PWM signal stays HIGH within one period called?",
+          "points": 1,
+          "acceptedAnswers": [
+            "duty cycle"
+          ]
+        },
+        {
+          "type": "identification",
+          "text": "What on-chip memory type is usually used to store the program code of a microcontroller and survives power loss?",
+          "points": 1,
+          "acceptedAnswers": [
+            "flash",
+            "flash memory"
+          ]
+        },
+        {
+          "type": "identification",
+          "text": "What is the name of the special timer that resets the microcontroller when the program hangs?",
+          "points": 1,
+          "acceptedAnswers": [
+            "watchdog timer",
+            "watchdog",
+            "WDT"
+          ]
+        },
+        {
+          "type": "identification",
+          "text": "What hardware feature moves data between memory and peripherals without CPU involvement? (acronym)",
+          "points": 1,
+          "acceptedAnswers": [
+            "DMA",
+            "direct memory access"
+          ]
+        },
+        {
+          "type": "identification",
+          "text": "In I2C, what is the name of the line that carries the clock signal?",
+          "points": 1,
+          "acceptedAnswers": [
+            "SCL",
+            "serial clock",
+            "serial clock line"
+          ]
+        },
+        {
+          "type": "identification",
+          "text": "What is the term for the unwanted rapid on/off transitions when a mechanical switch is pressed?",
+          "points": 1,
+          "acceptedAnswers": [
+            "bouncing",
+            "switch bounce",
+            "contact bounce",
+            "bounce"
+          ]
+        },
+        {
+          "type": "identification",
+          "text": "What kind of system must respond to events within a guaranteed time limit?",
+          "points": 1,
+          "acceptedAnswers": [
+            "real-time system",
+            "real time system",
+            "real-time",
+            "RTS"
+          ]
+        }
+      ]
+    },
+    {
+      "subject": "Database Design",
+      "title": "Unit 2 Examination - Database Design (Modules 6–9)",
+      "timeLimitMinutes": 180,
+      "shuffleQuestions": false,
+      "shuffleChoices": true,
+      "showResultsToStudents": false,
+      "secureMode": true,
+      "maxViolations": 5,
+      "questions": [
+        {
+          "type": "multiple_choice",
+          "text": "Which level of data model answers the question \"What things does the organization care about, and how are they related?\"",
+          "points": 1,
+          "choices": [
+            "Physical",
+            "Logical",
+            "Conceptual",
+            "Internal"
+          ],
+          "answer": 2
+        },
+        {
+          "type": "multiple_choice",
+          "text": "Which level of data model depends on a specific DBMS such as PostgreSQL?",
+          "points": 1,
+          "choices": [
+            "Conceptual",
+            "Physical",
+            "Logical",
+            "All three levels"
+          ],
+          "answer": 1
+        },
+        {
+          "type": "multiple_choice",
+          "text": "What is the correct order of the database design process?",
+          "points": 1,
+          "choices": [
+            "Physical implementation → logical model → conceptual model → requirements",
+            "Conceptual model → requirements → physical implementation → logical model",
+            "Requirements → logical model → conceptual model → physical implementation",
+            "Requirements → conceptual model → logical model → physical implementation"
+          ],
+          "answer": 3
+        },
+        {
+          "type": "multiple_choice",
+          "text": "An attribute such as address, which can be divided into street, city, and postal code, is called:",
+          "points": 1,
+          "choices": [
+            "Composite",
+            "Derived",
+            "Multivalued",
+            "Simple"
+          ],
+          "answer": 0
+        },
+        {
+          "type": "multiple_choice",
+          "text": "A student's age computed from birth_date is an example of which kind of attribute?",
+          "points": 1,
+          "choices": [
+            "Multivalued",
+            "Composite",
+            "Derived",
+            "Key"
+          ],
+          "answer": 2
+        },
+        {
+          "type": "multiple_choice",
+          "text": "A course that is a prerequisite of another course is a relationship of what degree?",
+          "points": 1,
+          "choices": [
+            "Binary",
+            "Unary (recursive)",
+            "Ternary",
+            "Quaternary"
+          ],
+          "answer": 1
+        },
+        {
+          "type": "multiple_choice",
+          "text": "One department offers many courses, and each course belongs to one department. What is the cardinality of this relationship?",
+          "points": 1,
+          "choices": [
+            "One-to-one (1:1)",
+            "Many-to-many (M:N)",
+            "Unary",
+            "One-to-many (1:N)"
+          ],
+          "answer": 3
+        },
+        {
+          "type": "multiple_choice",
+          "text": "The rule \"a section may exist before an instructor is assigned\" describes:",
+          "points": 1,
+          "choices": [
+            "Total participation",
+            "Partial participation",
+            "Many-to-many cardinality",
+            "A derived attribute"
+          ],
+          "answer": 1
+        },
+        {
+          "type": "multiple_choice",
+          "text": "Each student has at most one library account, and each library account belongs to one student. This relationship is:",
+          "points": 1,
+          "choices": [
+            "One-to-many (1:N)",
+            "Many-to-many (M:N)",
+            "One-to-one (1:1)",
+            "Ternary"
+          ],
+          "answer": 2
+        },
+        {
+          "type": "multiple_choice",
+          "text": "Which constraint is linked to the validity data-quality dimension?",
+          "points": 1,
+          "choices": [
+            "CHECK",
+            "NOT NULL",
+            "UNIQUE",
+            "DEFAULT"
+          ],
+          "answer": 0
+        },
+        {
+          "type": "multiple_choice",
+          "text": "A dependent of an employee, who is unique only together with that employee, is an example of a:",
+          "points": 1,
+          "choices": [
+            "Strong entity",
+            "Supertype",
+            "Weak entity",
+            "Derived attribute"
+          ],
+          "answer": 2
+        },
+        {
+          "type": "multiple_choice",
+          "text": "In the step-by-step modeling method, the verbs underlined in the requirements are candidate:",
+          "points": 1,
+          "choices": [
+            "Entities",
+            "Relationships",
+            "Attributes",
+            "Identifiers"
+          ],
+          "answer": 1
+        },
+        {
+          "type": "multiple_choice",
+          "text": "Which of the following is a common modeling mistake?",
+          "points": 1,
+          "choices": [
+            "Writing the business rules down",
+            "Resolving M:N relationships with associative entities",
+            "Choosing an identifier that can change, such as a person's name",
+            "Reading the diagram aloud to users as sentences"
+          ],
+          "answer": 2
+        },
+        {
+          "type": "multiple_choice",
+          "text": "Who proposed the entity-relationship model in 1976?",
+          "points": 1,
+          "choices": [
+            "Peter Chen",
+            "Eric Brewer",
+            "Martin Fowler",
+            "Edgar Codd"
+          ],
+          "answer": 0
+        },
+        {
+          "type": "multiple_choice",
+          "text": "Which constraint requires that a value must always be present in a column?",
+          "points": 1,
+          "choices": [
+            "UNIQUE",
+            "NOT NULL",
+            "CHECK",
+            "DEFAULT"
+          ],
+          "answer": 1
+        },
+        {
+          "type": "multiple_choice",
+          "text": "\"An instructor teaches a course to a student group in a room\" describes a relationship of what degree?",
+          "points": 1,
+          "choices": [
+            "Unary",
+            "Binary",
+            "Ternary",
+            "Recursive"
+          ],
+          "answer": 2
+        },
+        {
+          "type": "multiple_choice",
+          "text": "A multivalued attribute, such as several phone numbers per student, is mapped to:",
+          "points": 1,
+          "choices": [
+            "A comma-separated column",
+            "A separate table with a foreign key back to the owner",
+            "A derived column",
+            "A CHECK constraint"
+          ],
+          "answer": 1
+        },
+        {
+          "type": "multiple_choice",
+          "text": "Which SQL command removes a table, together with all of its data, from the database?",
+          "points": 1,
+          "choices": [
+            "DELETE TABLE",
+            "REMOVE TABLE",
+            "ALTER TABLE",
+            "DROP TABLE"
+          ],
+          "answer": 3
+        },
+        {
+          "type": "multiple_choice",
+          "text": "When you use CREATE TABLE to build tables linked by foreign keys, which table must be created first?",
+          "points": 1,
+          "choices": [
+            "The table being referenced (the parent)",
+            "The table that holds the foreign key (the child)",
+            "Either one; the order does not matter",
+            "The table with the most columns"
+          ],
+          "answer": 0
+        },
+        {
+          "type": "multiple_choice",
+          "text": "One person can be both a student and an instructor, such as a graduate teaching assistant. In specialization, this means the subtypes are:",
+          "points": 1,
+          "choices": [
+            "Disjoint",
+            "Weak",
+            "Derived",
+            "Overlapping"
+          ],
+          "answer": 3
+        },
+        {
+          "type": "multiple_choice",
+          "text": "NOT NULL and DEFAULT constraints support which data-quality dimension?",
+          "points": 1,
+          "choices": [
+            "Completeness",
+            "Validity",
+            "Consistency",
+            "Uniqueness"
+          ],
+          "answer": 0
+        },
+        {
+          "type": "multiple_choice",
+          "text": "Which referential action automatically deletes the child rows when their parent row is deleted?",
+          "points": 1,
+          "choices": [
+            "RESTRICT",
+            "SET NULL",
+            "CASCADE",
+            "NO ACTION"
+          ],
+          "answer": 2
+        },
+        {
+          "type": "multiple_choice",
+          "text": "Which referential action fits a link that is optional, such as a section whose instructor leaves?",
+          "points": 1,
+          "choices": [
+            "SET NULL",
+            "CASCADE",
+            "RESTRICT",
+            "SET DEFAULT"
+          ],
+          "answer": 0
+        },
+        {
+          "type": "multiple_choice",
+          "text": "MongoDB and Couchbase are examples of which NoSQL family?",
+          "points": 1,
+          "choices": [
+            "Key-value",
+            "Graph",
+            "Document",
+            "Wide-column"
+          ],
+          "answer": 2
+        },
+        {
+          "type": "multiple_choice",
+          "text": "The question \"Must every person be one of the subtypes?\" decides whether a specialization is:",
+          "points": 1,
+          "choices": [
+            "Disjoint or overlapping",
+            "Binary or ternary",
+            "Total or partial",
+            "Simple or composite"
+          ],
+          "answer": 2
+        },
+        {
+          "type": "multiple_choice",
+          "text": "Which constraint prevents two students from having the same email address?",
+          "points": 1,
+          "choices": [
+            "CHECK",
+            "UNIQUE",
+            "DEFAULT",
+            "FOREIGN KEY"
+          ],
+          "answer": 1
+        },
+        {
+          "type": "multiple_choice",
+          "text": "Which NoSQL family stores values the database does not look inside, and is typically used for caches, login sessions, and shopping carts?",
+          "points": 1,
+          "choices": [
+            "Graph",
+            "Wide-column",
+            "Document",
+            "Key-value"
+          ],
+          "answer": 3
+        },
+        {
+          "type": "multiple_choice",
+          "text": "Social networks, recommendations, and fraud detection are typical uses of which NoSQL family?",
+          "points": 1,
+          "choices": [
+            "Graph",
+            "Key-value",
+            "Wide-column",
+            "Document"
+          ],
+          "answer": 0
+        },
+        {
+          "type": "multiple_choice",
+          "text": "Which situation points toward a relational design rather than a NoSQL design?",
+          "points": 1,
+          "choices": [
+            "The data varies a lot from record to record",
+            "The data volume is beyond what one server can handle",
+            "Queries follow deep, variable-length paths",
+            "Rules across records are essential, such as no enrollment without a student"
+          ],
+          "answer": 3
+        },
+        {
+          "type": "multiple_choice",
+          "text": "According to Module 9, a good default when choosing a data model is to:",
+          "points": 1,
+          "choices": [
+            "Start relational, and add another data model only when you can name the problem it solves",
+            "Always start with a NoSQL database",
+            "Use a graph database for any data with relationships",
+            "Store every table as one ID plus a jsonb column"
+          ],
+          "answer": 0
+        },
+        {
+          "type": "identification",
+          "text": "The diagram notation that shows cardinality and participation with symbols such as ||, |o, |{, and o{ at the ends of relationship lines.",
+          "points": 1,
+          "acceptedAnswers": [
+            "Crow's foot notation",
+            "Crow's foot",
+            "Crow's-foot notation",
+            "Crow's-foot",
+            "Crow’s foot notation",
+            "Crow’s foot",
+            "Crows foot notation",
+            "Crows foot",
+            "Crowfoot",
+            "Crowfoot notation",
+            "Crow foot",
+            "Crow's feet"
+          ]
+        },
+        {
+          "type": "identification",
+          "text": "The number of entity types that a relationship connects.",
+          "points": 1,
+          "acceptedAnswers": [
+            "Degree",
+            "Degree of a relationship",
+            "Degree of the relationship",
+            "Relationship degree"
+          ]
+        },
+        {
+          "type": "identification",
+          "text": "The constraint that requires the values in a row to satisfy a condition, such as credits BETWEEN 1 AND 6.",
+          "points": 1,
+          "acceptedAnswers": [
+            "CHECK",
+            "CHECK constraint"
+          ]
+        },
+        {
+          "type": "identification",
+          "text": "The constraint that supplies a value when none is given, such as CURRENT_DATE for admitted_on.",
+          "points": 1,
+          "acceptedAnswers": [
+            "DEFAULT",
+            "DEFAULT constraint"
+          ]
+        },
+        {
+          "type": "identification",
+          "text": "The type of integrity enforced by a PRIMARY KEY, which ensures every row can be identified.",
+          "points": 1,
+          "acceptedAnswers": [
+            "Entity integrity",
+            "Entity"
+          ]
+        },
+        {
+          "type": "identification",
+          "text": "A general entity, such as PERSON, that holds the attributes shared by STUDENT and INSTRUCTOR.",
+          "points": 1,
+          "acceptedAnswers": [
+            "Supertype",
+            "Super type",
+            "Super-type",
+            "Supertype entity",
+            "Superclass",
+            "Super class"
+          ]
+        },
+        {
+          "type": "identification",
+          "text": "The referential action that refuses to delete a parent row while child rows still exist; used when records such as grades must never disappear.",
+          "points": 1,
+          "acceptedAnswers": [
+            "RESTRICT",
+            "ON DELETE RESTRICT"
+          ]
+        },
+        {
+          "type": "identification",
+          "text": "The SQL command used to define a new table with its columns and constraints.",
+          "points": 1,
+          "acceptedAnswers": [
+            "CREATE TABLE"
+          ]
+        },
+        {
+          "type": "identification",
+          "text": "The set of transaction guarantees meaning atomic, consistent, isolated, and durable.",
+          "points": 1,
+          "acceptedAnswers": [
+            "ACID",
+            "ACID properties"
+          ]
+        },
+        {
+          "type": "identification",
+          "text": "The logical design step that turns each part of an ER diagram into relational tables, columns, and keys.",
+          "points": 1,
+          "acceptedAnswers": [
+            "Mapping",
+            "ER-to-relational mapping",
+            "ER to relational mapping",
+            "ERD-to-relational mapping",
+            "ERD to relational mapping",
+            "ERD mapping",
+            "ER mapping",
+            "Relational mapping",
+            "Mapping the ERD"
+          ]
+        },
+        {
+          "type": "identification",
+          "text": "The type of integrity enforced by a FOREIGN KEY, which ensures that every reference points to an existing row.",
+          "points": 1,
+          "acceptedAnswers": [
+            "Referential integrity",
+            "Referential"
+          ]
+        },
+        {
+          "type": "identification",
+          "text": "The style of early NoSQL systems summed up as basically available, soft state, and eventually consistent.",
+          "points": 1,
+          "acceptedAnswers": [
+            "BASE"
+          ]
+        },
+        {
+          "type": "identification",
+          "text": "The theorem stating that a system keeping copies of data on several servers cannot guarantee consistency, availability, and partition tolerance at the same time.",
+          "points": 1,
+          "acceptedAnswers": [
+            "CAP theorem",
+            "CAP",
+            "Brewer's theorem",
+            "Brewer’s theorem"
+          ]
+        },
+        {
+          "type": "identification",
+          "text": "The property of a relationship that tells how many entities on one side can be related to entities on the other side, such as one-to-many.",
+          "points": 1,
+          "acceptedAnswers": [
+            "Cardinality"
+          ]
+        },
+        {
+          "type": "identification",
+          "text": "An attribute or set of attributes in an ERD that uniquely identifies an entity, such as student_no.",
+          "points": 1,
+          "acceptedAnswers": [
+            "Identifier",
+            "Unique identifier",
+            "Entity identifier",
+            "Key",
+            "Key attribute"
+          ]
+        }
+      ]
+    },
+    {
+      "subject": "Embedded Systems (CpET343)",
+      "title": "Embedded Systems (CpET343) Examination",
+      "timeLimitMinutes": 90,
+      "shuffleQuestions": false,
+      "shuffleChoices": true,
+      "showResultsToStudents": false,
+      "secureMode": true,
+      "maxViolations": 5,
+      "questions": [
+        {
+          "type": "multiple_choice",
+          "text": "In an Arduino sketch, the setup() function runs:",
+          "points": 1,
+          "choices": [
+            "Again and again, forever",
+            "Once, at power-up or reset",
+            "Only when a button is pressed",
+            "Every 20 ms"
+          ],
+          "answer": 1
+        },
+        {
+          "type": "multiple_choice",
+          "text": "Which step joins your code and the Arduino core code into one program?",
+          "points": 1,
+          "choices": [
+            "Preprocess",
+            "Compile",
+            "Link",
+            "Upload"
+          ],
+          "answer": 2
+        },
+        {
+          "type": "multiple_choice",
+          "text": "What receives the program over USB and stores it in flash memory?",
+          "points": 1,
+          "choices": [
+            "The bootloader",
+            "The ADC",
+            "Timer 0",
+            "The serial buffer"
+          ],
+          "answer": 0
+        },
+        {
+          "type": "multiple_choice",
+          "text": "Why is const preferred over #define for numbers?",
+          "points": 1,
+          "choices": [
+            "A const always runs faster",
+            "A #define uses more flash memory",
+            "A #define cannot hold numbers",
+            "A const has a type and is easier to debug"
+          ],
+          "answer": 3
+        },
+        {
+          "type": "multiple_choice",
+          "text": "In C++, the expression 7 / 2 (two integers) evaluates to:",
+          "points": 1,
+          "choices": [
+            "3.5",
+            "4",
+            "3",
+            "2"
+          ],
+          "answer": 2
+        },
+        {
+          "type": "multiple_choice",
+          "text": "Which statement is a bug that still compiles?",
+          "points": 1,
+          "choices": [
+            "if (x == 5)",
+            "if (x != 5)",
+            "if (x >= 5)",
+            "if (x = 5)"
+          ],
+          "answer": 3
+        },
+        {
+          "type": "multiple_choice",
+          "text": "A button is wired between D2 and GND, and the pin is set with pinMode(2, INPUT_PULLUP). What does digitalRead(2) return while the button is pressed?",
+          "points": 1,
+          "choices": [
+            "HIGH",
+            "LOW",
+            "A floating value",
+            "512"
+          ],
+          "answer": 1
+        },
+        {
+          "type": "multiple_choice",
+          "text": "What is a typical debounce time for a mechanical switch?",
+          "points": 1,
+          "choices": [
+            "20 to 50 ms",
+            "1 to 2 µs",
+            "1 to 2 seconds",
+            "500 ms"
+          ],
+          "answer": 0
+        },
+        {
+          "type": "multiple_choice",
+          "text": "Why is delay() avoided in real embedded systems?",
+          "points": 1,
+          "choices": [
+            "It uses Timer 2",
+            "It can damage the output pin",
+            "The processor cannot read buttons or update anything while it waits",
+            "It resets millis() to zero"
+          ],
+          "answer": 2
+        },
+        {
+          "type": "multiple_choice",
+          "text": "The millis() function returns:",
+          "points": 1,
+          "choices": [
+            "Seconds since reset, as an int",
+            "Milliseconds since start-up, as an unsigned long",
+            "Microseconds since start-up, as a float",
+            "The number of clock cycles since reset"
+          ],
+          "answer": 1
+        },
+        {
+          "type": "multiple_choice",
+          "text": "Why should you write millis() - lastBeat >= HEARTBEAT_MS instead of comparing millis() with a target time?",
+          "points": 1,
+          "choices": [
+            "It still works when millis() wraps around after 49.7 days",
+            "It uses less flash memory",
+            "It makes millis() count faster",
+            "The compiler does not allow comparisons with millis()"
+          ],
+          "answer": 0
+        },
+        {
+          "type": "multiple_choice",
+          "text": "What does Serial.print(F(\"text\")) do?",
+          "points": 1,
+          "choices": [
+            "Stores the text in flash memory to save SRAM",
+            "Prints the text in hexadecimal",
+            "Prints the text twice as fast",
+            "Prints the text as a float"
+          ],
+          "answer": 0
+        },
+        {
+          "type": "multiple_choice",
+          "text": "Which of the following is a style rule for embedded code?",
+          "points": 1,
+          "choices": [
+            "Use magic numbers to save memory",
+            "Use delay() for all timing",
+            "Put the whole program in one long function",
+            "Give every pin, time, and limit a named constant"
+          ],
+          "answer": 3
+        },
+        {
+          "type": "multiple_choice",
+          "text": "The HC-SR04 ultrasonic sensor gives which type of output?",
+          "points": 1,
+          "choices": [
+            "Analog voltage",
+            "Digital level",
+            "Digital pulse",
+            "Digital data (a message)"
+          ],
+          "answer": 2
+        },
+        {
+          "type": "multiple_choice",
+          "text": "Which datasheet specification answers \"What is the smallest change it can show?\"",
+          "points": 1,
+          "choices": [
+            "Range",
+            "Accuracy",
+            "Response time",
+            "Resolution"
+          ],
+          "answer": 3
+        },
+        {
+          "type": "multiple_choice",
+          "text": "The ADC of the ATmega328P has a resolution of:",
+          "points": 1,
+          "choices": [
+            "8 bits",
+            "10 bits",
+            "12 bits",
+            "16 bits"
+          ],
+          "answer": 1
+        },
+        {
+          "type": "multiple_choice",
+          "text": "What is the ADC step size when the reference voltage is 5 V?",
+          "points": 1,
+          "choices": [
+            "4.88 mV",
+            "1.07 mV",
+            "19.5 mV",
+            "5.00 mV"
+          ],
+          "answer": 0
+        },
+        {
+          "type": "multiple_choice",
+          "text": "If you apply a voltage to the AREF pin, what must you do before calling analogRead()?",
+          "points": 1,
+          "choices": [
+            "Select INTERNAL in software",
+            "Select DEFAULT in software",
+            "Disconnect the USB cable",
+            "Select EXTERNAL in software"
+          ],
+          "answer": 3
+        },
+        {
+          "type": "multiple_choice",
+          "text": "An LDR is wired from 5 V to the output, with a 10 kilohm resistor from the output to GND. When the light increases, the output voltage:",
+          "points": 1,
+          "choices": [
+            "Rises",
+            "Falls",
+            "Stays the same",
+            "Drops to 0 V"
+          ],
+          "answer": 0
+        },
+        {
+          "type": "multiple_choice",
+          "text": "As the temperature rises, the resistance of an NTC thermistor:",
+          "points": 1,
+          "choices": [
+            "Rises",
+            "Stays the same",
+            "Falls",
+            "Doubles every degree"
+          ],
+          "answer": 2
+        },
+        {
+          "type": "multiple_choice",
+          "text": "Averaging 8 independent readings reduces random noise by about:",
+          "points": 1,
+          "choices": [
+            "8 times",
+            "2.8 times",
+            "64 times",
+            "4 times"
+          ],
+          "answer": 1
+        },
+        {
+          "type": "multiple_choice",
+          "text": "Switching a fan on above 30.0 °C and off below 29.0 °C, so it does not chatter, is called:",
+          "points": 1,
+          "choices": [
+            "Calibration",
+            "Averaging",
+            "Debouncing",
+            "Hysteresis"
+          ],
+          "answer": 3
+        },
+        {
+          "type": "multiple_choice",
+          "text": "A reading of 0 or 1023 from a sensor voltage divider often means:",
+          "points": 1,
+          "choices": [
+            "The sensor is open or shorted",
+            "The reading is perfectly accurate",
+            "The ADC is working in 8-bit mode",
+            "The sensor is still warming up"
+          ],
+          "answer": 0
+        },
+        {
+          "type": "multiple_choice",
+          "text": "How often, at most, should a DHT22 sensor be read?",
+          "points": 1,
+          "choices": [
+            "Once every 2 seconds",
+            "Once every 10 ms",
+            "Once every 60 ms",
+            "Once every 104 µs"
+          ],
+          "answer": 0
+        },
+        {
+          "type": "multiple_choice",
+          "text": "Which timer does the Arduino core use for millis(), micros(), and delay()?",
+          "points": 1,
+          "choices": [
+            "Timer 0",
+            "Timer 1",
+            "Timer 2",
+            "The watchdog timer"
+          ],
+          "answer": 0
+        },
+        {
+          "type": "multiple_choice",
+          "text": "tone() uses Timer 2. On which pins does it disable PWM (analogWrite)?",
+          "points": 1,
+          "choices": [
+            "D5 and D6",
+            "D9 and D10",
+            "D3 and D11",
+            "D2 and D3"
+          ],
+          "answer": 2
+        },
+        {
+          "type": "multiple_choice",
+          "text": "analogWrite(9, 128) produces a duty cycle of about:",
+          "points": 1,
+          "choices": [
+            "25%",
+            "50%",
+            "75%",
+            "100%"
+          ],
+          "answer": 1
+        },
+        {
+          "type": "multiple_choice",
+          "text": "How often does a hobby servo need a control pulse?",
+          "points": 1,
+          "choices": [
+            "Every 1 ms",
+            "Every 2 ms",
+            "Every 20 ms",
+            "Every second"
+          ],
+          "answer": 2
+        },
+        {
+          "type": "multiple_choice",
+          "text": "Which keyword tells the compiler that a variable shared with an ISR can change at any time?",
+          "points": 1,
+          "choices": [
+            "const",
+            "static",
+            "unsigned",
+            "volatile"
+          ],
+          "answer": 3
+        },
+        {
+          "type": "multiple_choice",
+          "text": "A system in which missing a deadline counts as a failure, such as an airbag, is:",
+          "points": 1,
+          "choices": [
+            "Soft real-time",
+            "Firm real-time",
+            "Hard real-time",
+            "Best-effort"
+          ],
+          "answer": 2
+        },
+        {
+          "type": "identification",
+          "text": "The required sketch function that runs once, at power-up or reset.",
+          "points": 1,
+          "acceptedAnswers": [
+            "setup()",
+            "setup",
+            "void setup()",
+            "void setup",
+            "setup function",
+            "setup() function"
+          ]
+        },
+        {
+          "type": "identification",
+          "text": "Accepting a new switch state only after the signal has been stable for a short time.",
+          "points": 1,
+          "acceptedAnswers": [
+            "Debouncing",
+            "Debounce",
+            "Switch debouncing",
+            "Debouncing a switch"
+          ]
+        },
+        {
+          "type": "identification",
+          "text": "The function that returns the number of milliseconds since start-up.",
+          "points": 1,
+          "acceptedAnswers": [
+            "millis()",
+            "millis",
+            "millis() function",
+            "millis function"
+          ]
+        },
+        {
+          "type": "identification",
+          "text": "The speed of a serial port in symbols per second, such as 9600.",
+          "points": 1,
+          "acceptedAnswers": [
+            "Baud rate",
+            "Baud",
+            "Baudrate",
+            "Baud-rate"
+          ]
+        },
+        {
+          "type": "identification",
+          "text": "A device that converts a physical quantity, such as temperature or light, into an electrical signal.",
+          "points": 1,
+          "acceptedAnswers": [
+            "Sensor",
+            "Sensors"
+          ]
+        },
+        {
+          "type": "identification",
+          "text": "The datasheet specification that tells how close a reading is to the true value.",
+          "points": 1,
+          "acceptedAnswers": [
+            "Accuracy"
+          ]
+        },
+        {
+          "type": "identification",
+          "text": "The hardware that converts an analog voltage into a number from 0 to 1023.",
+          "points": 1,
+          "acceptedAnswers": [
+            "ADC",
+            "Analog-to-digital converter",
+            "Analog to digital converter",
+            "Analog-to-digital converter (ADC)",
+            "A/D converter",
+            "Analog-digital converter"
+          ]
+        },
+        {
+          "type": "identification",
+          "text": "The Arduino function that keeps a value inside given limits.",
+          "points": 1,
+          "acceptedAnswers": [
+            "constrain()",
+            "constrain",
+            "constrain() function",
+            "constrain function"
+          ]
+        },
+        {
+          "type": "identification",
+          "text": "A device that turns an electrical signal into an action, such as a motor or buzzer.",
+          "points": 1,
+          "acceptedAnswers": [
+            "Actuator",
+            "Actuators"
+          ]
+        },
+        {
+          "type": "identification",
+          "text": "The fraction of each PWM period that the output is ON.",
+          "points": 1,
+          "acceptedAnswers": [
+            "Duty cycle",
+            "Duty",
+            "Duty-cycle"
+          ]
+        },
+        {
+          "type": "identification",
+          "text": "A hardware block that counts clock ticks by itself while the CPU does other work.",
+          "points": 1,
+          "acceptedAnswers": [
+            "Timer",
+            "Hardware timer",
+            "Timer/counter",
+            "Timer counter",
+            "Counter"
+          ]
+        },
+        {
+          "type": "identification",
+          "text": "Checking for an event again and again in the main loop.",
+          "points": 1,
+          "acceptedAnswers": [
+            "Polling",
+            "Poll"
+          ]
+        },
+        {
+          "type": "identification",
+          "text": "The short function that runs when an interrupt occurs.",
+          "points": 1,
+          "acceptedAnswers": [
+            "ISR",
+            "Interrupt service routine",
+            "Interrupt Service Routine (ISR)",
+            "Interrupt handler",
+            "ISR (interrupt service routine)"
+          ]
+        },
+        {
+          "type": "identification",
+          "text": "A bug in which the result depends on the exact moment an interrupt occurs.",
+          "points": 1,
+          "acceptedAnswers": [
+            "Race condition",
+            "Race",
+            "Data race"
+          ]
+        },
+        {
+          "type": "identification",
+          "text": "The variation in timing from one cycle to the next.",
+          "points": 1,
+          "acceptedAnswers": [
+            "Jitter",
+            "Timing jitter"
+          ]
+        }
+      ]
+    }
+  ]
+}

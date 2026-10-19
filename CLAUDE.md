@@ -17,7 +17,11 @@ npx vitest run -t "subject enrollment"   # one describe block (see caveat below)
 npx prisma migrate dev --name <name>     # new migration + regenerate client
 npm run create-teacher -- --email t@school.edu --name "Name" --password 'secret123'
 npm run seed:quizzes -- data/quizzes.sample.json --strict   # --replace overwrites unassigned same-titled quizzes
+npm run export:quizzes       # all quizzes in the DB -> data/seed/quizzes.json
+npm run bootstrap            # teacher from data/seed/teacher.json + quizzes from data/seed/*.json; idempotent, run by setup-ec2.sh
 ```
+
+`backend/data/seed/` is gitignored on purpose: the repo is public, and that folder holds answer keys and the teacher's plaintext password. Never commit it, and never move its contents into tracked files.
 
 Test database: create `quiz_platform_test` once, then apply migrations to it. Do this again after every new migration, or the tests fail:
 
@@ -51,7 +55,7 @@ Local PostgreSQL runs on 5432. `docker compose up -d db` runs it on **5433** ins
 - **Visibility.** A student sees a quiz only when the assignment's section equals the section in `student_subjects` for that quiz's subject. Irregular students take different subjects in different sections, so never use `users.section_id` for this; it is only the student's "home" section. Another student's attempt returns 404, not 403.
 - **Answer keys never reach students.** Student-facing queries in [attempts.service.ts](backend/src/attempts/attempts.service.ts) must not select `is_correct` or `accepted_answers`, and a test checks for those strings in responses. Result feedback says correct/incorrect but never what the right answer was.
 - **Quiz lock.** Once any attempt exists, question and choice ids are frozen (adding, removing or retyping them returns 409 `QUIZ_LOCKED`). Wording, points and keys can still change, and submitted attempts are re-graded.
-- **Auth.** The access JWT lives in frontend memory. The refresh token is a rotating httpOnly cookie scoped to `/api/auth`. `requireAuth` reloads the user from the DB on every request, so deactivating an account takes effect immediately.
+- **Auth.** The access JWT lives in frontend memory. The refresh token is a rotating httpOnly cookie scoped to `/api/auth`. `requireAuth` reloads the user from the DB on every request, so deactivating an account takes effect immediately. The app has no teacher password screen. On hosts with no shell (Render), `index.ts` calls `ensureTeacherFromEnv()` ([teacher-account.ts](backend/src/auth/teacher-account.ts)) before listening: `TEACHER_EMAIL`/`TEACHER_NAME`/`TEACHER_PASSWORD` create the teacher or reset its password, and a bad value stops startup.
 
 ### Tests
 

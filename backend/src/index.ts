@@ -1,10 +1,12 @@
 import { config } from './config';
 import { createApp } from './app';
 import { startAutoSubmitJob } from './attempts/auto-submit.job';
+import { ensureTeacherFromEnv } from './auth/teacher-account';
 import { prisma } from './db';
 
 async function main() {
   await prisma.$connect();
+  await ensureTeacherFromEnv();
   const app = createApp();
   const server = app.listen(config.port, () => {
     console.log(`JASthinkAboutIT API listening on http://localhost:${config.port} (CORS origin: ${config.frontendUrl})`);

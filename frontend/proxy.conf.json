@@ -2,6 +2,6 @@
   "/api": {
     "target": "https://dyasmir.onrender.com",
     "secure": false,
-    "changeOrigin": false
+    "changeOrigin": true
   }
 }

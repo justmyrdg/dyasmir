@@ -86,6 +86,8 @@ fi
 JWT_SECRET=$(env_get JWT_ACCESS_SECRET)
 [[ ${#JWT_SECRET} -ge 32 && $JWT_SECRET != *CHANGE_ME* && $JWT_SECRET != *change-me* ]] \
   || die "Set JWT_ACCESS_SECRET in backend/.env to a long random value: openssl rand -hex 48"
+[[ $(env_get CREDENTIALS_KEY) =~ ^[0-9a-fA-F]{64}$ ]] \
+  || die "Set CREDENTIALS_KEY in backend/.env to 64 hex characters: openssl rand -hex 32"
 [[ $(env_get FRONTEND_URL) == "https://$DOMAIN" ]] || warn "FRONTEND_URL in backend/.env should be https://$DOMAIN"
 PORT=$(env_get PORT); PORT=${PORT:-3000}
 [[ -n $(env_get DATABASE_URL) ]] || die "Set DATABASE_URL in backend/.env."
@@ -143,6 +145,8 @@ if [[ $SRC_DIR != "$APP_DIR" ]]; then
 fi
 chown -R "$APP_USER:$APP_USER" "$APP_DIR"
 chmod 600 "$APP_DIR/backend/.env"
+# Answer keys and the teacher's password (see backend/scripts/bootstrap.ts).
+if [[ -d $APP_DIR/backend/data/seed ]]; then chmod -R go-rwx "$APP_DIR/backend/data/seed"; fi
 
 log "Building the backend"
 as_app "cd '$APP_DIR/backend' && npm ci --no-audit --no-fund && npx prisma generate && npm run build"
@@ -152,6 +156,9 @@ as_app "cd '$APP_DIR/frontend' && npm ci --no-audit --no-fund && npm run build"
 
 log "Applying database migrations"
 as_app "cd '$APP_DIR/backend' && npx prisma migrate deploy && npm run db:seed"
+
+log "Loading seed data from backend/data/seed (teacher account and quizzes; existing ones are kept)"
+as_app "cd '$APP_DIR/backend' && /usr/local/bin/node dist/scripts/bootstrap.js"
 
 # ---------------------------------------------------------------------------- app service
 
@@ -290,10 +297,11 @@ cat <<EOF
 $(printf '\033[1;32m')Done.$(printf '\033[0m') The site will be at https://$DOMAIN once your domain points at this server
 (Caddy gets the HTTPS certificate on the first visit; ports 80 and 443 must be open).
 
-First time only, create the teacher account:
+The teacher account and quizzes in backend/data/seed/ were loaded above (see the "Loading seed data" step).
+Without backend/data/seed/teacher.json, create the teacher account yourself (also resets a password):
   sudo runuser -u $APP_USER -- bash -c 'cd $APP_DIR/backend && /usr/local/bin/node dist/scripts/create-teacher.js --email you@school.edu --name "Your Name"'
 
-Load quizzes from a JSON file (put it in backend/data/ before running this script):
+Load quizzes from another JSON file (put it in backend/data/ before running this script):
   sudo runuser -u $APP_USER -- bash -c 'cd $APP_DIR/backend && /usr/local/bin/node dist/scripts/seed-quizzes.js data/your-quizzes.json'
 
 Useful:

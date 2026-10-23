@@ -80,6 +80,8 @@ model User {
   mustChangePassword Boolean        @default(false) @map("must_change_password")
   /// The last authenticated request, written at most every 30 s. The teacher's "Online now" page reads it.
   lastSeenAt       DateTime?        @map("last_seen_at") @db.Timestamptz(6)
+  /// The device of that request (src/attempts/device.ts, without the key), for "Online now".
+  lastDevice       Json?            @map("last_device") @db.JsonB
   lastLoginAt      DateTime?        @map("last_login_at") @db.Timestamptz(6)
   isActive         Boolean          @default(true) @map("is_active")
   failedLoginCount Int              @default(0) @map("failed_login_count")

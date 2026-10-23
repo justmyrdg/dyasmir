@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { interval } from 'rxjs';
 import { errorMessage } from '../core/errors';
+import { deviceIcon, deviceSpecs, deviceTitle } from '../core/device-label';
 import type { OnlineNow } from '../core/models';
 import { formatManila } from '../core/time';
 import { TeacherApi } from './teacher-api';
@@ -66,6 +67,7 @@ const REFRESH_MS = 15_000;
                 <th>Student</th>
                 <th>Section</th>
                 <th>Doing</th>
+                <th>Device</th>
                 <th>Last active</th>
                 <th>Signed in</th>
               </tr>
@@ -91,13 +93,28 @@ const REFRESH_MS = 15_000;
                     } @else {
                       <span class="text-sm text-slate-500">Browsing</span>
                     }
+                    @if (s.taking && s.taking.devices > 1) {
+                      <div class="mt-1">
+                        <span class="badge bg-amber-100 text-amber-800" title="This quiz was answered from more than one device or browser">
+                          ⚠ {{ s.taking.devices }} devices on this quiz
+                        </span>
+                      </div>
+                    }
+                  </td>
+                  <td class="text-sm">
+                    @if (s.device; as dv) {
+                      <div class="whitespace-nowrap" [title]="dv.userAgent">{{ deviceIcon(dv) }} {{ deviceTitle(dv) }}</div>
+                      <div class="text-xs text-slate-500">{{ deviceSpecs(dv) }}</div>
+                    } @else {
+                      <span class="text-slate-400">—</span>
+                    }
                   </td>
                   <td class="text-sm whitespace-nowrap">{{ ago(s.seenSecondsAgo) }}</td>
                   <td class="text-sm whitespace-nowrap text-slate-500">{{ fmt(s.lastLoginAt) }}</td>
                 </tr>
               } @empty {
                 <tr>
-                  <td colspan="5" class="py-8 text-center text-slate-500">No students online right now.</td>
+                  <td colspan="6" class="py-8 text-center text-slate-500">No students online right now.</td>
                 </tr>
               }
             </tbody>
@@ -117,6 +134,9 @@ export class OnlinePage implements OnInit {
   protected readonly section = signal<string | null>(null);
   protected readonly search = signal('');
   protected readonly fmt = formatManila;
+  protected readonly deviceIcon = deviceIcon;
+  protected readonly deviceTitle = deviceTitle;
+  protected readonly deviceSpecs = deviceSpecs;
 
   protected readonly windowMinutes = computed(() => (this.data()?.onlineSeconds ?? 150) / 60);
   protected readonly visible = computed(() => {

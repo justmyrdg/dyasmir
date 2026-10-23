@@ -1,4 +1,4 @@
-// What the quiz screen tells the server about this device, as the `X-Device` header on /api/attempts/* requests
+// What the app tells the server about this device, as the `X-Device` header on signed-in /api/* requests
 // (read by backend src/attempts/device.ts). The User-Agent header already carries the browser and OS.
 
 const ID_KEY = 'device-id';

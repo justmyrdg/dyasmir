@@ -34,7 +34,7 @@ const STATUS: Record<ResultRow['status'], { label: string; cls: string }> = {
     <div class="card overflow-hidden">
       <div class="border-b border-slate-200 px-4 pt-4 pb-3">
         <div class="mb-3 flex flex-wrap items-baseline justify-between gap-2">
-          <h2 class="text-lg font-bold">Results <span class="font-normal text-slate-500">({{ rows().length }})</span></h2>
+          <h2 class="text-lg font-bold">Results <span class="font-normal text-slate-500">({{ visible().length }})</span></h2>
           <div class="flex flex-wrap gap-4 text-sm text-slate-600">
             <span><span class="font-semibold text-ink">{{ counts().submitted }}</span> submitted</span>
             <span><span class="font-semibold text-ink">{{ counts().in_progress }}</span> in progress</span>
@@ -44,7 +44,7 @@ const STATUS: Record<ResultRow['status'], { label: string; cls: string }> = {
             }
           </div>
         </div>
-    <div class="grid gap-3 md:grid-cols-4">
+    <div class="grid gap-3 md:grid-cols-5">
       <div>
         <label class="label">Section</label>
         <select class="input" [ngModel]="sectionId()" (ngModelChange)="sectionId.set($event); load()">
@@ -72,6 +72,10 @@ const STATUS: Record<ResultRow['status'], { label: string; cls: string }> = {
           }
         </select>
       </div>
+      <div>
+        <label class="label" for="results-search">Student</label>
+        <input id="results-search" class="input" type="search" placeholder="Name or SR code" [ngModel]="search()" (ngModelChange)="search.set($event)" />
+      </div>
     </div>
       </div>
 
@@ -91,7 +95,7 @@ const STATUS: Record<ResultRow['status'], { label: string; cls: string }> = {
           </tr>
         </thead>
         <tbody class="divide-y divide-slate-100">
-          @for (r of rows(); track r.studentId + '-' + r.quizId) {
+          @for (r of visible(); track r.studentId + '-' + r.quizId) {
             <tr>
               <td class="font-mono whitespace-nowrap">{{ r.srCode }}</td>
               <td>
@@ -129,7 +133,7 @@ const STATUS: Record<ResultRow['status'], { label: string; cls: string }> = {
             </tr>
           } @empty {
             <tr>
-              <td colspan="9" class="py-8 text-center text-slate-500">{{ loading() ? 'Loading…' : 'No results for these filters. Assign a quiz to a section first.' }}</td>
+              <td colspan="9" class="py-8 text-center text-slate-500">{{ loading() ? 'Loading…' : rows().length ? 'No student matches "' + search().trim() + '".' : 'No results for these filters. Assign a quiz to a section first.' }}</td>
             </tr>
           }
         </tbody>
@@ -150,6 +154,7 @@ export class ResultsPage implements OnInit {
   protected readonly sectionId = signal<number | null>(null);
   protected readonly subjectId = signal<number | null>(null);
   protected readonly quizId = signal<number | null>(null);
+  protected readonly search = signal('');
   protected readonly loading = signal(true);
   protected readonly busy = signal(false);
   protected readonly error = signal('');
@@ -159,8 +164,14 @@ export class ResultsPage implements OnInit {
     return this.quizzes().filter((q) => !sub || q.subject.id === sub);
   });
 
+  /** Rows matching the name / SR code search (filtered here, so typing doesn't refetch). */
+  protected readonly visible = computed(() => {
+    const q = this.search().trim().toLowerCase();
+    return q ? this.rows().filter((r) => r.name.toLowerCase().includes(q) || r.srCode.includes(q)) : this.rows();
+  });
+
   protected readonly counts = computed(() => {
-    const rows = this.rows();
+    const rows = this.visible();
     const submitted = rows.filter((r) => r.status === 'submitted');
     const pct = submitted.flatMap((r) => (r.totalPoints ? [((r.score ?? 0) / r.totalPoints) * 100] : []));
     return {
@@ -202,7 +213,8 @@ export class ResultsPage implements OnInit {
   protected async export(format: 'csv' | 'xlsx') {
     this.busy.set(true);
     try {
-      await this.api.download('/api/teacher/results/export', { ...this.filters(), format }, `quiz-results.${format}`);
+      const search = this.search().trim() || null; // export what is on screen
+      await this.api.download('/api/teacher/results/export', { ...this.filters(), search, format }, `quiz-results.${format}`);
     } catch (err) {
       this.error.set(errorMessage(err, 'Export failed.'));
     } finally {

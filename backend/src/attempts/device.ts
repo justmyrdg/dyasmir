@@ -20,6 +20,9 @@ export interface DeviceInfo {
   userAgent: string;
 }
 
+/** What "Online now" shows of a student's latest request (users.last_device): the device without its key. */
+export type OnlineDevice = Omit<DeviceInfo, 'deviceKey'>;
+
 interface ClientHeader {
   id?: unknown;
   screen?: unknown;
@@ -106,6 +109,12 @@ export function deviceFromRequest(req: Request): DeviceInfo {
     ip: req.ip ? req.ip.replace(/^::ffff:/, '').slice(0, 45) : null,
     userAgent,
   };
+}
+
+export function onlineDeviceFromRequest(req: Request): OnlineDevice {
+  const { deviceKey, ...device } = deviceFromRequest(req);
+  void deviceKey;
+  return device;
 }
 
 /**

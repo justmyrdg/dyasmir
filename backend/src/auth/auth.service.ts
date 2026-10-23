@@ -1,3 +1,4 @@
+import type { OnlineDevice } from '../attempts/device';
 import { config } from '../config';
 import { prisma } from '../db';
 import { badRequest, forbidden, HttpError, unauthorized } from '../lib/http-error';
@@ -170,9 +171,9 @@ export async function revokeAllForUser(userId: number): Promise<void> {
 }
 
 /** "Last seen" for the teacher's Online now page. Written at most every 30 s, so most requests change nothing. */
-export async function touchLastSeen(userId: number): Promise<void> {
+export async function touchLastSeen(userId: number, device: OnlineDevice): Promise<void> {
   await prisma.$executeRaw`
-    UPDATE users SET last_seen_at = now()
+    UPDATE users SET last_seen_at = now(), last_device = ${JSON.stringify(device)}::jsonb
     WHERE id = ${userId} AND (last_seen_at IS NULL OR last_seen_at < now() - interval '30 seconds')`;
 }
 

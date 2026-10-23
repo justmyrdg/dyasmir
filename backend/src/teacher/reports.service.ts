@@ -132,6 +132,8 @@ export interface ResultsFilter {
   sectionId?: number;
   subjectId?: number;
   quizId?: number;
+  /** Part of the student's name (any case) or SR code. */
+  search?: string;
 }
 
 export interface ResultRow {
@@ -168,6 +170,8 @@ export async function results(filter: ResultsFilter): Promise<ResultRow[]> {
   if (filter.sectionId) where.push(Prisma.sql`asg.section_id = ${filter.sectionId}`);
   if (filter.subjectId) where.push(Prisma.sql`q.subject_id = ${filter.subjectId}`);
   if (filter.quizId) where.push(Prisma.sql`q.id = ${filter.quizId}`);
+  const search = filter.search?.trim();
+  if (search) where.push(Prisma.sql`(strpos(lower(u.name), lower(${search})) > 0 OR strpos(u.sr_code, ${search}) > 0)`);
 
   const rows = await prisma.$queryRaw<
     {

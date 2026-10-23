@@ -230,8 +230,10 @@ export interface OnlineNow {
     seenSecondsAgo: number;
     lastLoginAt: string | null;
     mustChangePassword: boolean;
-    /** The quiz they have open (an in-progress attempt). */
-    taking: { attemptId: number; title: string } | null;
+    /** The device of their latest request; null if not seen since devices were recorded. */
+    device: DeviceSummary | null;
+    /** The quiz they have open (an in-progress attempt) and how many devices it was answered from. */
+    taking: { attemptId: number; title: string; devices: number } | null;
   }[];
 }
 
@@ -305,9 +307,8 @@ export interface ResultRow {
   devices: number;
 }
 
-/** One device/browser seen during an attempt (from its User-Agent and the X-Device header; can be faked). */
-export interface AttemptDevice {
-  id: number;
+/** A student's device, from the User-Agent and the X-Device header (can be faked). */
+export interface DeviceSummary {
   deviceType: 'phone' | 'tablet' | 'computer';
   os: string;
   browser: string;
@@ -317,6 +318,11 @@ export interface AttemptDevice {
   touch: boolean | null;
   ip: string | null;
   userAgent: string;
+}
+
+/** One device/browser seen during an attempt. */
+export interface AttemptDevice extends DeviceSummary {
+  id: number;
   firstSeenAt: string;
   lastSeenAt: string;
   /** Other students whose attempt at this quiz came from the same browser. */

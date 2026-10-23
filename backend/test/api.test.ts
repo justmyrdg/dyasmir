@@ -1305,7 +1305,7 @@ describe('who is online', () => {
   type Online = {
     serverNow: string;
     sections: { section: string; online: number; students: number }[];
-    students: { srCode: string; section: string; seenSecondsAgo: number; lastLoginAt: string | null; taking: { attemptId: number; title: string } | null }[];
+    students: { srCode: string; section: string; seenSecondsAgo: number; lastLoginAt: string | null; taking: { attemptId: number; title: string; devices: number } | null }[];
   };
   const online = async (): Promise<Online> => {
     const res = await request(app).get('/api/teacher/online').set(auth(teacherToken));
@@ -1341,7 +1341,7 @@ describe('who is online', () => {
     const now = await online();
     const mine = now.students.filter((s) => SR.includes(s.srCode));
     expect(mine.map((s) => s.srCode).sort()).toEqual(SR);
-    expect(mine.find((s) => s.srCode === SR[0])!.taking).toEqual({ attemptId: attempt.body.id, title: 'Online check quiz' });
+    expect(mine.find((s) => s.srCode === SR[0])!.taking).toEqual({ attemptId: attempt.body.id, title: 'Online check quiz', devices: 1 });
     expect(mine.find((s) => s.srCode === SR[1])!.taking).toBeNull();
     expect(mine.every((s) => s.seenSecondsAgo >= 0 && s.seenSecondsAgo < 60 && s.lastLoginAt !== null && s.section === 'BCpET3102')).toBe(true);
     const b = now.sections.find((s) => s.section === 'BCpET3102')!;
@@ -1622,6 +1622,23 @@ describe('which device a student takes the quiz on', () => {
     expect(rows.find((r) => r.srCode === SR[1] && r.quiz === 'Device test')?.devices).toBe(1);
   });
 
+  it('results can be searched by part of a name (any case) or SR code, on screen and in the export', async () => {
+    const search = async (q: string) => {
+      const res = await request(app).get('/api/teacher/results').set(auth(teacherToken)).query({ search: q });
+      expect(res.status).toBe(200);
+      return (res.body as { srCode: string }[]).map((r) => r.srCode).sort();
+    };
+    // One row per quiz assigned to their section, so compare the sets of students.
+    expect([...new Set(await search('dEVICE'))]).toEqual(SR);
+    expect([...new Set(await search('vice 2'))]).toEqual([SR[1]]);
+    expect(await search('23-6100')).toEqual(await search('Device'));
+    expect(await search('%')).toEqual([]); // not a wildcard
+    const csv = await request(app).get('/api/teacher/results/export').set(auth(teacherToken)).query({ format: 'csv', search: SR[1] });
+    expect(csv.status).toBe(200);
+    expect(csv.text).toContain(SR[1]);
+    expect(csv.text).not.toContain(SR[0]);
+  });
+
   it('flags two students answering from the same browser', async () => {
     await save(1, PHONE, { id: 'phone-1', screen: '2340x1080', touch: true }).expect(200);
     expect((await devices(1))[1].alsoUsedBy).toMatchObject([{ srCode: SR[0] }]);
@@ -1636,5 +1653,21 @@ describe('which device a student takes the quiz on', () => {
     await request(app).post(`/api/attempts/${attempts[1]}/submit`).set(auth(tokens[1])).expect(200);
     await request(app).get(`/api/attempts/${attempts[1]}`).set(auth(tokens[1])).set('User-Agent', IPHONE).expect(200);
     expect(await devices(1)).toHaveLength(3);
+  });
+  it('"Online now" shows the device of each student’s latest request and warns about a switch', async () => {
+    await prisma.$executeRaw`UPDATE users SET last_seen_at = NULL WHERE sr_code = ${SR[0]}`; // written at most every 30 s
+    await request(app)
+      .get('/api/student/assignments')
+      .set(auth(tokens[0]))
+      .set('User-Agent', PHONE)
+      .set('X-Device', header({ id: 'phone-1', screen: '2340x1080', touch: true }))
+      .expect(200);
+    const res = await request(app).get('/api/teacher/online').set(auth(teacherToken));
+    const me = (res.body.students as { srCode: string; device: Record<string, unknown> | null; taking: { devices: number } | null }[]).find(
+      (s) => s.srCode === SR[0],
+    );
+    expect(me?.device).toMatchObject({ deviceType: 'phone', os: 'Android 13', browser: 'Chrome 141', model: 'SM-A546E', screen: '2340x1080' });
+    expect(me?.device).not.toHaveProperty('deviceKey');
+    expect(me?.taking?.devices).toBe(3);
   });
 });

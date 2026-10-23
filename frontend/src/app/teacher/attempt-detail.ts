@@ -1,6 +1,7 @@
 import { Component, computed, inject, input, OnInit, signal } from '@angular/core';
 import { errorMessage } from '../core/errors';
-import type { AttemptDetail, AttemptDevice } from '../core/models';
+import { deviceIcon, deviceSpecs, deviceTitle } from '../core/device-label';
+import type { AttemptDetail } from '../core/models';
 import { ServerClock } from '../core/server-clock';
 import { formatDuration, formatManila, formatManilaTime } from '../core/time';
 import { TeacherApi } from './teacher-api';
@@ -318,24 +319,9 @@ export class AttemptDetailPage implements OnInit {
 
   protected readonly sharedDevice = computed(() => this.detail()?.devices.some((d) => d.alsoUsedBy.length) ?? false);
 
-  protected deviceIcon(d: AttemptDevice) {
-    return d.deviceType === 'computer' ? '💻' : '📱';
-  }
-
-  protected deviceTitle(d: AttemptDevice) {
-    const kind = { phone: 'Phone', tablet: 'Tablet', computer: 'Computer' }[d.deviceType];
-    return [d.model ? `${kind} (${d.model})` : kind, d.os, d.browser].join(' · ');
-  }
-
-  protected deviceSpecs(d: AttemptDevice) {
-    return [
-      d.screen ? `screen ${d.screen.replace('x', '×')}` : null,
-      d.touch === null ? null : d.touch ? 'touch screen' : 'no touch screen',
-      d.ip ? `IP ${d.ip}` : null,
-    ]
-      .filter(Boolean)
-      .join(' · ');
-  }
+  protected readonly deviceIcon = deviceIcon;
+  protected readonly deviceTitle = deviceTitle;
+  protected readonly deviceSpecs = deviceSpecs;
 
   protected seconds(ms: number) {
     const s = Math.round(ms / 1000);

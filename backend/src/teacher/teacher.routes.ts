@@ -48,6 +48,7 @@ function resultsFilter(query: Record<string, unknown>): reports.ResultsFilter {
     sectionId: optionalIntQuery(query.sectionId, 'sectionId'),
     subjectId: optionalIntQuery(query.subjectId, 'subjectId'),
     quizId: optionalIntQuery(query.quizId, 'quizId'),
+    search: typeof query.search === 'string' ? query.search.slice(0, 100) : undefined,
   };
 }
 

@@ -8,9 +8,8 @@ import { errorCode } from './errors';
 const withToken = (req: HttpRequest<unknown>, token: string | null) =>
   token ? req.clone({ setHeaders: { Authorization: `Bearer ${token}` } }) : req;
 
-/** Quiz requests say which device they come from, for the teacher (see core/device.ts). */
-const withDevice = (req: HttpRequest<unknown>) =>
-  req.url.startsWith('/api/attempts') ? req.clone({ setHeaders: { [DEVICE_HEADER]: deviceHeader() } }) : req;
+/** Every API call says which device it comes from, for the teacher's attempt and Online now pages (core/device.ts). */
+const withDevice = (req: HttpRequest<unknown>) => req.clone({ setHeaders: { [DEVICE_HEADER]: deviceHeader() } });
 
 /**
  * Adds the access token to API calls; on 401 refreshes once and retries. A 403 PASSWORD_CHANGE_REQUIRED sends the

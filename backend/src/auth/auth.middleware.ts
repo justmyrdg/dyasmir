@@ -1,5 +1,6 @@
 import type { NextFunction, Request, Response } from 'express';
 import { forbidden, HttpError, unauthorized } from '../lib/http-error';
+import { onlineDeviceFromRequest } from '../attempts/device';
 import { loadAuthUser, touchLastSeen } from './auth.service';
 import type { AuthUser, Role } from './auth.types';
 import { verifyAccessToken } from './tokens';
@@ -16,7 +17,7 @@ export async function requireAuth(req: Request, _res: Response, next: NextFuncti
   }
   const user = await loadAuthUser(userId);
   if (!user) throw unauthorized('Account not found or deactivated');
-  await touchLastSeen(user.id);
+  await touchLastSeen(user.id, onlineDeviceFromRequest(req));
   req.user = user;
   next();
 }

@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { isEmail } from 'class-validator';
 import { parse } from 'csv-parse/sync';
 import ExcelJS from 'exceljs';
+import type { OnlineDevice } from '../attempts/device';
 import { autoSubmitExpired } from '../attempts/grading';
 import { revokeAllForUser } from '../auth/auth.service';
 import { dbNow, prisma, type Tx } from '../db';
@@ -121,15 +122,18 @@ export async function onlineNow() {
         must_change_password: boolean;
         attempt_id: number | null;
         title: string | null;
+        devices: number | null;
+        last_device: OnlineDevice | null;
       }[]
     >`
       SELECT u.id, u.sr_code, u.name, sec.name AS section,
              floor(extract(epoch FROM now() - u.last_seen_at))::int AS seen_seconds_ago,
-             u.last_login_at, u.must_change_password, cur.id AS attempt_id, cur.title
+             u.last_login_at, u.must_change_password, u.last_device, cur.id AS attempt_id, cur.title, cur.devices
       FROM users u
       LEFT JOIN sections sec ON sec.id = u.section_id
       LEFT JOIN LATERAL (
-        SELECT at.id, q.title FROM attempts at
+        SELECT at.id, q.title, (SELECT count(*)::int FROM attempt_devices d WHERE d.attempt_id = at.id) AS devices
+        FROM attempts at
         JOIN assignments asg ON asg.id = at.assignment_id
         JOIN quizzes q ON q.id = asg.quiz_id
         WHERE at.student_id = u.id AND at.status = 'in_progress'
@@ -157,7 +161,10 @@ export async function onlineNow() {
       seenSecondsAgo: s.seen_seconds_ago,
       lastLoginAt: s.last_login_at,
       mustChangePassword: s.must_change_password,
-      taking: s.attempt_id === null ? null : { attemptId: s.attempt_id, title: s.title! },
+      /** The device of their latest request (null for accounts not seen since this was added). */
+      device: s.last_device,
+      /** devices = how many devices/browsers that attempt has been answered from. */
+      taking: s.attempt_id === null ? null : { attemptId: s.attempt_id, title: s.title!, devices: s.devices ?? 0 },
     })),
   };
 }

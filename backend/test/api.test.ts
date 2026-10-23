@@ -3,7 +3,7 @@ import ExcelJS from 'exceljs';
 import { SMTPServer } from 'smtp-server';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createApp } from '../src/app';
+import { createApp, trustProxySetting } from '../src/app';
 import { autoSubmitExpired } from '../src/attempts/grading';
 import { ensureTeacher } from '../src/auth/teacher-account';
 import { prisma } from '../src/db';
@@ -1669,5 +1669,33 @@ describe('which device a student takes the quiz on', () => {
     expect(me?.device).toMatchObject({ deviceType: 'phone', os: 'Android 13', browser: 'Chrome 141', model: 'SM-A546E', screen: '2340x1080' });
     expect(me?.device).not.toHaveProperty('deviceKey');
     expect(me?.taking?.devices).toBe(3);
+  });
+});
+
+describe('TRUST_PROXY (hosts behind a proxy, such as Render)', () => {
+  it('accepts true, false, a hop count or addresses', () => {
+    expect(trustProxySetting(undefined)).toBeUndefined();
+    expect(trustProxySetting(' ')).toBeUndefined();
+    expect(trustProxySetting('true')).toBe(true);
+    expect(trustProxySetting('TRUE')).toBe(true);
+    expect(trustProxySetting('false')).toBe(false);
+    expect(trustProxySetting('1')).toBe(1);
+    expect(trustProxySetting('loopback, 10.0.0.0/8')).toBe('loopback, 10.0.0.0/8');
+  });
+
+  it('with TRUST_PROXY=true the server starts and records the student’s address, not the proxy’s', async () => {
+    const before = process.env.TRUST_PROXY;
+    process.env.TRUST_PROXY = 'true';
+    try {
+      const proxied = createApp();
+      const token = await studentToken('23-61001');
+      await prisma.$executeRaw`UPDATE users SET last_seen_at = NULL WHERE sr_code = '23-61001'`;
+      await request(proxied).get('/api/student/assignments').set(auth(token)).set('X-Forwarded-For', '203.0.113.7').expect(200);
+      const u = await prisma.user.findUniqueOrThrow({ where: { srCode: '23-61001' } });
+      expect((u.lastDevice as { ip: string }).ip).toBe('203.0.113.7');
+    } finally {
+      if (before === undefined) delete process.env.TRUST_PROXY;
+      else process.env.TRUST_PROXY = before;
+    }
   });
 });

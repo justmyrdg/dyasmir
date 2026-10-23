@@ -16,7 +16,8 @@ import { teacherRouter } from './teacher/teacher.routes';
 export function createApp() {
   const app = express();
 
-  if (process.env.TRUST_PROXY) app.set('trust proxy', Number(process.env.TRUST_PROXY) || process.env.TRUST_PROXY);
+  const trustProxy = trustProxySetting(process.env.TRUST_PROXY);
+  if (trustProxy !== undefined) app.set('trust proxy', trustProxy);
   app.disable('x-powered-by');
   app.use(helmet());
   app.use(
@@ -59,6 +60,19 @@ export function createApp() {
 
   app.use(errorHandler);
   return app;
+}
+
+/**
+ * TRUST_PROXY: a hop count ("1"), "true"/"false", or addresses/subnets ("loopback", "10.0.0.0/8"). Express reads
+ * a plain string as addresses only, so "true" would crash at startup.
+ */
+export function trustProxySetting(value: string | undefined): boolean | number | string | undefined {
+  const v = value?.trim();
+  if (!v) return undefined;
+  if (v.toLowerCase() === 'true') return true;
+  if (v.toLowerCase() === 'false') return false;
+  if (/^\d+$/.test(v)) return Number(v);
+  return v;
 }
 
 function errorHandler(err: unknown, _req: Request, res: Response, _next: NextFunction) {

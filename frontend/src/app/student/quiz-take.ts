@@ -3,6 +3,7 @@ import { Component, computed, effect, inject, input, OnDestroy, OnInit, signal, 
 import { Router, RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { AuthService } from '../core/auth.service';
+import { DEVICE_HEADER, deviceHeader } from '../core/device';
 import { errorMessage } from '../core/errors';
 import type { AttemptView } from '../core/models';
 import { ServerClock } from '../core/server-clock';
@@ -573,7 +574,7 @@ export class QuizTake implements OnInit, OnDestroy {
       void fetch(`/api/attempts/${this.id()}/save`, {
         method: 'POST',
         keepalive: true,
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, [DEVICE_HEADER]: deviceHeader() },
         body: JSON.stringify({
           answers: Object.entries(this.pending.answers).map(([questionId, answer]) => ({ questionId: Number(questionId), answer })),
           ...(this.pending.currentIndex !== undefined ? { currentIndex: this.pending.currentIndex } : {}),
@@ -740,7 +741,7 @@ export class QuizTake implements OnInit, OnDestroy {
       void fetch(`/api/attempts/${this.id()}/events`, {
         method: 'POST',
         keepalive: true,
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, [DEVICE_HEADER]: deviceHeader() },
         body: JSON.stringify({ events: this.events.slice(0, 50) }),
       }).catch(() => undefined);
     } catch {

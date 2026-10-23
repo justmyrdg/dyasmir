@@ -2,10 +2,15 @@ import { HttpErrorResponse, HttpInterceptorFn, HttpRequest } from '@angular/comm
 import { inject } from '@angular/core';
 import { catchError, switchMap, throwError } from 'rxjs';
 import { AuthService } from './auth.service';
+import { DEVICE_HEADER, deviceHeader } from './device';
 import { errorCode } from './errors';
 
 const withToken = (req: HttpRequest<unknown>, token: string | null) =>
   token ? req.clone({ setHeaders: { Authorization: `Bearer ${token}` } }) : req;
+
+/** Quiz requests say which device they come from, for the teacher (see core/device.ts). */
+const withDevice = (req: HttpRequest<unknown>) =>
+  req.url.startsWith('/api/attempts') ? req.clone({ setHeaders: { [DEVICE_HEADER]: deviceHeader() } }) : req;
 
 /**
  * Adds the access token to API calls; on 401 refreshes once and retries. A 403 PASSWORD_CHANGE_REQUIRED sends the
@@ -14,6 +19,7 @@ const withToken = (req: HttpRequest<unknown>, token: string | null) =>
 export const authInterceptor: HttpInterceptorFn = (req, next) => {
   if (!req.url.startsWith('/api/') || req.url.startsWith('/api/auth/')) return next(req);
   const auth = inject(AuthService);
+  req = withDevice(req);
 
   return next(withToken(req, auth.accessToken())).pipe(
     catchError((err: unknown) => {

@@ -26,5 +26,8 @@ export const STUDENT_EVENT_TYPES = EVENT_TYPES.filter((t) => t !== 'reopened');
 /** Events that count toward the quiz's "submit automatically after N times" limit. */
 export const COUNTED_EVENT_TYPES: AttemptEventType[] = ['left_page', 'screenshot_key', 'fullscreen_exit', 'print_attempt'];
 
+/** A locked-out student's request to reopen the exam (same list as reopen_requests_status_check). */
+export type ReopenRequestStatus = 'pending' | 'approved' | 'declined';
+
 /** Stop storing events for an attempt past this many (a stuck client cannot flood the table). */
 export const MAX_EVENTS_PER_ATTEMPT = 2000;

@@ -3,9 +3,9 @@ import type { AuthUser } from '../auth/auth.types';
 import { prisma, type Db } from '../db';
 import { badRequest, conflict, notFound } from '../lib/http-error';
 import { shuffled } from '../lib/shuffle';
-import type { RecordEventsDto, SaveAttemptDto } from './attempts.dto';
+import type { RecordEventsDto, ReopenRequestDto, SaveAttemptDto } from './attempts.dto';
 import { autoSubmitExpired, DEADLINE_SQL, gradeAttempt, TOTAL_POINTS_SQL } from './grading';
-import { COUNTED_EVENT_TYPES, MAX_EVENTS_PER_ATTEMPT } from './security';
+import { COUNTED_EVENT_TYPES, MAX_EVENTS_PER_ATTEMPT, type ReopenRequestStatus } from './security';
 
 export type StudentQuizStatus = 'not_yet_open' | 'open' | 'in_progress' | 'closed' | 'submitted';
 
@@ -349,6 +349,11 @@ export async function submitAttempt(user: AuthUser, attemptId: number) {
 // Exam security events
 // ---------------------------------------------------------------------------
 
+/** Left the exam as many times as the quiz allows (so a submitted attempt was submitted by the system). */
+function reachedLimit(row: AttemptRow, violations: number): boolean {
+  return row.secure_mode && row.max_violations > 0 && violations >= row.max_violations;
+}
+
 async function securitySummary(row: AttemptRow, attemptId: number) {
   const violations = await countViolations(prisma, attemptId);
   return {
@@ -356,7 +361,7 @@ async function securitySummary(row: AttemptRow, attemptId: number) {
     violations,
     maxViolations: row.max_violations,
     /** Submitted by the system because the student left the exam too many times. */
-    autoSubmitted: row.secure_mode && row.max_violations > 0 && violations >= row.max_violations,
+    autoSubmitted: reachedLimit(row, violations),
   };
 }
 
@@ -420,6 +425,64 @@ export async function recordEvents(user: AuthUser, attemptId: number, dto: Recor
     return { status: 'in_progress' as const, autoSubmitted: false, violations, maxViolations: row.max_violations };
   });
   return outcome;
+}
+
+// ---------------------------------------------------------------------------
+// Asking the teacher to reopen an exam submitted for leaving it
+// ---------------------------------------------------------------------------
+
+/**
+ * What the result page shows a locked-out student. While locked out nothing they do is recorded (events on a
+ * submitted attempt are dropped), so they can leave the page to message the teacher. The end time does not move.
+ */
+async function reopenRequestState(db: Db, row: AttemptRow) {
+  const lockedOut = row.status === 'submitted' && reachedLimit(row, await countViolations(db, row.id));
+  const [latest] = await db.$queryRaw<
+    { id: number; status: ReopenRequestStatus; message: string | null; created_at: Date; resolved_at: Date | null; this_lockout: boolean }[]
+  >`
+    SELECT r.id, r.status, r.message, r.created_at, r.resolved_at,
+           r.created_at > coalesce(at.reopened_at, '-infinity'::timestamptz) AS this_lockout
+    FROM reopen_requests r JOIN attempts at ON at.id = r.attempt_id
+    WHERE r.attempt_id = ${row.id}
+    ORDER BY r.created_at DESC, r.id DESC
+    LIMIT 1`;
+  return {
+    attemptStatus: row.status,
+    lockedOut,
+    /** One request per lockout, and only while there is time left to come back to. */
+    canRequest: lockedOut && row.now < row.deadline && !latest?.this_lockout,
+    deadline: row.deadline,
+    serverNow: row.now,
+    request: latest
+      ? { id: latest.id, status: latest.status, message: latest.message, createdAt: latest.created_at, resolvedAt: latest.resolved_at }
+      : null,
+  };
+}
+
+export async function getReopenRequest(user: AuthUser, attemptId: number) {
+  await loadOwnAttempt(prisma, user, attemptId);
+  await autoSubmitExpired({ attemptId });
+  return reopenRequestState(prisma, await loadOwnAttempt(prisma, user, attemptId));
+}
+
+/** Sends the request (a second click returns the pending one). The teacher approves or declines it. */
+export async function requestReopen(user: AuthUser, attemptId: number, dto: ReopenRequestDto) {
+  return prisma.$transaction(async (tx) => {
+    const row = await loadOwnAttempt(tx, user, attemptId, true);
+    const state = await reopenRequestState(tx, row);
+    if (!state.lockedOut) {
+      throw conflict('Only an exam that was submitted for leaving it too many times can be reopened on request.', 'NOT_LOCKED_OUT');
+    }
+    if (state.request?.status === 'pending') return { created: false, state };
+    if (!state.canRequest) {
+      throw row.now >= row.deadline
+        ? conflict('Your exam time is over, so there is no time left to reopen it with. Message your teacher.', 'TIME_UP')
+        : conflict('Your teacher declined your request to reopen this exam.', 'REQUEST_DECLINED');
+    }
+    const message = dto.message?.trim() || null;
+    await tx.$executeRaw`INSERT INTO reopen_requests (attempt_id, message, created_at) VALUES (${attemptId}, ${message}, now())`;
+    return { created: true, state: await reopenRequestState(tx, row) };
+  });
 }
 
 export async function getResultForStudent(user: AuthUser, attemptId: number) {

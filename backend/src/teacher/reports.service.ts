@@ -2,7 +2,7 @@ import { Prisma } from '@prisma/client';
 import ExcelJS from 'exceljs';
 import { autoSubmitExpired, DEADLINE_SQL, gradeAttempt, TOTAL_POINTS_SQL } from '../attempts/grading';
 import { COUNTED_EVENT_TYPES } from '../attempts/security';
-import { prisma } from '../db';
+import { dbNow, prisma, type Db, type Tx } from '../db';
 import { safeCell, toCsv } from '../lib/csv';
 import { badRequest, conflict, notFound } from '../lib/http-error';
 
@@ -154,6 +154,8 @@ export interface ResultRow {
   flags: number;
   /** Times the student left the exam / pressed a screenshot or print key (the auto-submit counter). */
   violations: number;
+  /** Different devices/browsers used during the attempt; more than 1 means the student switched. */
+  devices: number;
 }
 
 export async function results(filter: ResultsFilter): Promise<ResultRow[]> {
@@ -185,6 +187,7 @@ export async function results(filter: ResultsFilter): Promise<ResultRow[]> {
       is_active: boolean;
       flags: number;
       violations: number;
+      devices: number;
     }[]
   >`
     SELECT u.id AS student_id, u.sr_code, u.name, sec.name AS section, u.is_active,
@@ -192,7 +195,8 @@ export async function results(filter: ResultsFilter): Promise<ResultRow[]> {
            at.id AS attempt_id, at.status, at.score, at.started_at, at.submitted_at,
            (SELECT count(*)::int FROM attempt_events e WHERE e.attempt_id = at.id) AS flags,
            (SELECT count(*)::int FROM attempt_events e
-             WHERE e.attempt_id = at.id AND e.type = ANY(${COUNTED_EVENT_TYPES}::text[])) AS violations
+             WHERE e.attempt_id = at.id AND e.type = ANY(${COUNTED_EVENT_TYPES}::text[])) AS violations,
+           (SELECT count(*)::int FROM attempt_devices d WHERE d.attempt_id = at.id) AS devices
     FROM assignments asg
     JOIN quizzes q ON q.id = asg.quiz_id
     JOIN subjects sub ON sub.id = q.subject_id
@@ -222,6 +226,7 @@ export async function results(filter: ResultsFilter): Promise<ResultRow[]> {
     isActive: r.is_active,
     flags: r.flags,
     violations: r.violations,
+    devices: r.devices,
   }));
 }
 
@@ -297,6 +302,7 @@ export async function attemptDetail(attemptId: number) {
       sr_code: string;
       name: string;
       section: string;
+      assignment_id: number;
       quiz_id: number;
       title: string;
       total_points: number;
@@ -304,12 +310,13 @@ export async function attemptDetail(attemptId: number) {
       max_violations: number;
       reopened_at: Date | null;
       extended_until: Date | null;
+      now: Date;
     }[]
   >`
     SELECT at.id, at.status, at.score, at.started_at, at.submitted_at, at.current_index, at.question_order, at.choice_order,
            at.reopened_at, at.extended_until,
-           ${DEADLINE_SQL} AS deadline,
-           u.sr_code, u.name, sec.name AS section, q.id AS quiz_id, q.title, ${TOTAL_POINTS_SQL} AS total_points,
+           ${DEADLINE_SQL} AS deadline, now() AS now,
+           u.sr_code, u.name, sec.name AS section, at.assignment_id, q.id AS quiz_id, q.title, ${TOTAL_POINTS_SQL} AS total_points,
            q.secure_mode, q.max_violations
     FROM attempts at
     JOIN assignments asg ON asg.id = at.assignment_id
@@ -328,6 +335,23 @@ export async function attemptDetail(attemptId: number) {
   const answers = new Map((await prisma.attemptAnswer.findMany({ where: { attemptId } })).map((a) => [a.questionId, a]));
   const events = await prisma.attemptEvent.findMany({ where: { attemptId }, orderBy: [{ occurredAt: 'asc' }, { id: 'asc' }] });
   const violations = events.filter((e) => (COUNTED_EVENT_TYPES as string[]).includes(e.type)).length;
+  const reopenRequest = await prisma.reopenRequest.findFirst({
+    where: { attemptId, status: 'pending' },
+    select: { id: true, message: true, createdAt: true },
+  });
+
+  const devices = await prisma.attemptDevice.findMany({ where: { attemptId }, orderBy: [{ firstSeenAt: 'asc' }, { id: 'asc' }] });
+  // Another student's attempt at the same quiz from the same browser (same random id): possibly sharing a device.
+  const shared = devices.length
+    ? await prisma.$queryRaw<{ device_key: string; attempt_id: number; name: string; sr_code: string }[]>`
+        SELECT DISTINCT d.device_key, at.id AS attempt_id, u.name, u.sr_code
+        FROM attempt_devices d
+        JOIN attempts at ON at.id = d.attempt_id
+        JOIN users u ON u.id = at.student_id
+        WHERE at.assignment_id = ${row.assignment_id} AND at.id <> ${attemptId}
+          AND d.device_key LIKE 'b:%' AND d.device_key = ANY(${devices.map((d) => d.deviceKey)}::text[])
+        ORDER BY u.name`
+    : [];
 
   return {
     id: row.id,
@@ -337,9 +361,12 @@ export async function attemptDetail(attemptId: number) {
     startedAt: row.started_at,
     submittedAt: row.submitted_at,
     deadline: row.deadline,
+    serverNow: row.now,
     currentIndex: row.current_index,
     reopenedAt: row.reopened_at,
     extendedUntil: row.extended_until,
+    /** The student's pending request to reopen it (after being submitted for leaving the exam), if any. */
+    reopenRequest,
     student: { srCode: row.sr_code, name: row.name, section: row.section },
     quiz: { id: row.quiz_id, title: row.title },
     security: {
@@ -348,6 +375,23 @@ export async function attemptDetail(attemptId: number) {
       violations,
       autoSubmitted: row.status === 'submitted' && row.secure_mode && row.max_violations > 0 && violations >= row.max_violations,
     },
+    /** Each device/browser seen during the attempt, first one first. */
+    devices: devices.map((d) => ({
+      id: d.id,
+      deviceType: d.deviceType,
+      os: d.os,
+      browser: d.browser,
+      model: d.model,
+      screen: d.screen,
+      touch: d.touch,
+      ip: d.ip,
+      userAgent: d.userAgent,
+      firstSeenAt: d.firstSeenAt,
+      lastSeenAt: d.lastSeenAt,
+      alsoUsedBy: shared
+        .filter((x) => x.device_key === d.deviceKey)
+        .map((x) => ({ attemptId: x.attempt_id, name: x.name, srCode: x.sr_code })),
+    })),
     events: events.map((e) => ({
       id: e.id,
       type: e.type,
@@ -418,22 +462,104 @@ export async function recheckItem(attemptId: number, questionId: number, correct
 
 /**
  * Reopens a submitted attempt so the student can revise their answers: same questions, same order, answers kept,
- * a new end time of now + minutes, and the leave-the-exam counter starts again. The score is recomputed when they submit.
+ * and the leave-the-exam counter starts again. The score is recomputed when they submit.
+ * minutes = a new end time of now + minutes; null = keep the end time it has (the clock kept running meanwhile).
+ * A pending reopen request from the student is answered as approved.
  */
-export async function reopenAttempt(attemptId: number, minutes: number) {
-  await prisma.$transaction(async (tx) => {
-    const [a] = await tx.$queryRaw<{ status: string }[]>`SELECT status FROM attempts WHERE id = ${attemptId} FOR UPDATE`;
-    if (!a) throw notFound('Attempt not found');
-    if (a.status !== 'submitted') throw conflict('This attempt is still in progress.', 'NOT_SUBMITTED');
-    await tx.$executeRaw`
-      UPDATE attempts SET status = 'in_progress', submitted_at = NULL, score = NULL,
-             extended_until = now() + make_interval(mins => ${minutes}::int), reopened_at = now()
-      WHERE id = ${attemptId}`;
-    await tx.$executeRaw`
-      INSERT INTO attempt_events (attempt_id, type, occurred_at, detail)
-      VALUES (${attemptId}, 'reopened', now(), ${`reopened by the teacher for ${minutes} min`})`;
-  });
+async function reopenInTx(tx: Tx, attemptId: number, minutes: number | null, detail: string) {
+  const [a] = await tx.$queryRaw<{ status: string; time_left: boolean }[]>`
+    SELECT at.status, ${DEADLINE_SQL} > now() AS time_left
+    FROM attempts at
+    JOIN assignments asg ON asg.id = at.assignment_id
+    JOIN quizzes q ON q.id = asg.quiz_id
+    WHERE at.id = ${attemptId}
+    FOR UPDATE OF at`;
+  if (!a) throw notFound('Attempt not found');
+  if (a.status !== 'submitted') throw conflict('This attempt is still in progress.', 'NOT_SUBMITTED');
+  if (minutes === null && !a.time_left) {
+    throw conflict("This attempt's end time has passed, so there is no time left to reopen it with. Give extra minutes instead.", 'TIME_UP');
+  }
+  const newEnd = minutes === null ? Prisma.empty : Prisma.sql`, extended_until = now() + make_interval(mins => ${minutes}::int)`;
+  await tx.$executeRaw`
+    UPDATE attempts SET status = 'in_progress', submitted_at = NULL, score = NULL, reopened_at = now() ${newEnd}
+    WHERE id = ${attemptId}`;
+  await tx.$executeRaw`
+    INSERT INTO attempt_events (attempt_id, type, occurred_at, detail)
+    VALUES (${attemptId}, 'reopened', now(), ${minutes === null ? detail : `${detail} for ${minutes} min`})`;
+  await tx.$executeRaw`
+    UPDATE reopen_requests SET status = 'approved', resolved_at = now() WHERE attempt_id = ${attemptId} AND status = 'pending'`;
+}
+
+export async function reopenAttempt(attemptId: number, minutes: number | null) {
+  await prisma.$transaction((tx) =>
+    reopenInTx(tx, attemptId, minutes, minutes === null ? 'reopened by the teacher, end time unchanged' : 'reopened by the teacher'),
+  );
   return attemptDetail(attemptId);
+}
+
+// ---------------------------------------------------------------------------
+// Reopen requests from students submitted for leaving the exam
+// ---------------------------------------------------------------------------
+
+export async function listReopenRequests() {
+  const rows = await prisma.$queryRaw<
+    {
+      id: number;
+      attempt_id: number;
+      message: string | null;
+      created_at: Date;
+      deadline: Date;
+      name: string;
+      sr_code: string;
+      section: string;
+      quiz_id: number;
+      title: string;
+    }[]
+  >`
+    SELECT r.id, r.attempt_id, r.message, r.created_at, ${DEADLINE_SQL} AS deadline,
+           u.name, u.sr_code, sec.name AS section, q.id AS quiz_id, q.title
+    FROM reopen_requests r
+    JOIN attempts at ON at.id = r.attempt_id
+    JOIN assignments asg ON asg.id = at.assignment_id
+    JOIN quizzes q ON q.id = asg.quiz_id
+    JOIN users u ON u.id = at.student_id
+    JOIN sections sec ON sec.id = asg.section_id
+    WHERE r.status = 'pending'
+    ORDER BY r.created_at, r.id`;
+  return {
+    serverNow: await dbNow(),
+    items: rows.map((r) => ({
+      id: r.id,
+      attemptId: r.attempt_id,
+      message: r.message,
+      createdAt: r.created_at,
+      /** Unchanged by approving: the student comes back to whatever time is left. */
+      deadline: r.deadline,
+      student: { name: r.name, srCode: r.sr_code, section: r.section },
+      quiz: { id: r.quiz_id, title: r.title },
+    })),
+  };
+}
+
+async function pendingRequest(db: Db, requestId: number) {
+  const r = await db.reopenRequest.findUnique({ where: { id: requestId } });
+  if (!r) throw notFound('Request not found');
+  if (r.status !== 'pending') throw conflict('This request has already been answered.', 'NOT_PENDING');
+  return r;
+}
+
+export async function approveReopenRequest(requestId: number) {
+  await prisma.$transaction(async (tx) => {
+    const r = await pendingRequest(tx, requestId);
+    await reopenInTx(tx, r.attemptId, null, "reopened at the student's request, end time unchanged");
+  });
+  return { id: requestId, status: 'approved' as const };
+}
+
+export async function declineReopenRequest(requestId: number) {
+  await pendingRequest(prisma, requestId);
+  await prisma.$executeRaw`UPDATE reopen_requests SET status = 'declined', resolved_at = now() WHERE id = ${requestId} AND status = 'pending'`;
+  return { id: requestId, status: 'declined' as const };
 }
 
 /** Deletes an attempt so the student can take the quiz again (only possible while the window is open). */

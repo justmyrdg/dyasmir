@@ -113,7 +113,11 @@ const STATUS: Record<ResultRow['status'], { label: string; cls: string }> = {
                   <span class="badge bg-rose-100 text-rose-800" [title]="r.flags + ' security events in total'">⚠ Left exam ×{{ r.violations }}</span>
                 } @else if (r.flags > 0) {
                   <span class="badge bg-amber-100 text-amber-800" title="Blocked copy/paste or similar">{{ r.flags }} {{ r.flags === 1 ? 'flag' : 'flags' }}</span>
-                } @else if (r.attemptId) {
+                }
+                @if (r.devices > 1) {
+                  <span class="badge bg-amber-100 text-amber-800" title="Answered from more than one device or browser">📱 {{ r.devices }} devices</span>
+                }
+                @if (r.attemptId && !r.flags && r.devices <= 1) {
                   <span class="text-xs text-slate-400">None</span>
                 }
               </td>

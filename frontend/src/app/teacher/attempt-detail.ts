@@ -1,6 +1,6 @@
 import { Component, computed, inject, input, OnInit, signal } from '@angular/core';
 import { errorMessage } from '../core/errors';
-import type { AttemptDetail } from '../core/models';
+import type { AttemptDetail, AttemptDevice } from '../core/models';
 import { ServerClock } from '../core/server-clock';
 import { formatDuration, formatManila, formatManilaTime } from '../core/time';
 import { TeacherApi } from './teacher-api';
@@ -119,6 +119,48 @@ type Decision = 'auto' | 'correct' | 'wrong';
             </button>
             <button class="btn-ghost btn-sm" (click)="reopenOpen.set(false)">Cancel</button>
           </div>
+        </div>
+      }
+
+      @if (d.devices.length) {
+        <div class="card mb-4 overflow-hidden">
+          <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-3">
+            <h2 class="text-lg font-bold">
+              Devices
+              <span class="font-normal text-slate-500">({{ d.devices.length }})</span>
+            </h2>
+            <div class="flex flex-wrap items-center gap-2 text-sm">
+              @if (d.devices.length > 1) {
+                <span class="badge bg-amber-100 text-amber-800">⚠ Switched devices during the quiz</span>
+              }
+              @if (sharedDevice()) {
+                <span class="badge bg-rose-100 text-rose-800">⚠ Same browser as another student</span>
+              }
+            </div>
+          </div>
+          <ul class="divide-y divide-slate-100 text-sm">
+            @for (dv of d.devices; track dv.id) {
+              <li class="px-5 py-3" [class.bg-rose-50]="dv.alsoUsedBy.length">
+                <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                  <span class="font-semibold" [title]="dv.userAgent">{{ deviceIcon(dv) }} {{ deviceTitle(dv) }}</span>
+                  <span class="text-slate-500">{{ deviceSpecs(dv) }}</span>
+                </div>
+                <div class="mt-0.5 text-xs text-slate-500">
+                  First seen {{ time(dv.firstSeenAt) }} · last seen {{ time(dv.lastSeenAt) }}
+                </div>
+                @for (o of dv.alsoUsedBy; track o.attemptId) {
+                  <div class="mt-1 text-xs text-rose-700">
+                    Also used by {{ o.name }} ({{ o.srCode }}) for this quiz ·
+                    <a class="link" [href]="'/teacher/attempts/' + o.attemptId" target="_blank" rel="noopener">open their attempt</a>
+                  </div>
+                }
+              </li>
+            }
+          </ul>
+          <p class="border-t border-slate-100 px-5 py-2 text-xs text-slate-500">
+            Reported by the student's browser. A determined student can fake it, so treat it as a clue, not proof.
+            Students on the same Wi-Fi share one IP address.
+          </p>
         </div>
       }
 
@@ -272,6 +314,27 @@ export class AttemptDetailPage implements OnInit {
 
   protected label(type: string) {
     return AttemptDetailPage.LABELS[type] ?? type;
+  }
+
+  protected readonly sharedDevice = computed(() => this.detail()?.devices.some((d) => d.alsoUsedBy.length) ?? false);
+
+  protected deviceIcon(d: AttemptDevice) {
+    return d.deviceType === 'computer' ? '💻' : '📱';
+  }
+
+  protected deviceTitle(d: AttemptDevice) {
+    const kind = { phone: 'Phone', tablet: 'Tablet', computer: 'Computer' }[d.deviceType];
+    return [d.model ? `${kind} (${d.model})` : kind, d.os, d.browser].join(' · ');
+  }
+
+  protected deviceSpecs(d: AttemptDevice) {
+    return [
+      d.screen ? `screen ${d.screen.replace('x', '×')}` : null,
+      d.touch === null ? null : d.touch ? 'touch screen' : 'no touch screen',
+      d.ip ? `IP ${d.ip}` : null,
+    ]
+      .filter(Boolean)
+      .join(' · ');
   }
 
   protected seconds(ms: number) {

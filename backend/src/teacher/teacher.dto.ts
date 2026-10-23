@@ -125,11 +125,12 @@ export class ImportStudentsDto {
 // ---------------- Reopen ----------------
 
 export class ReopenAttemptDto {
-  /** Minutes the student gets from now to revise and submit again. */
+  /** Minutes the student gets from now to revise and submit again. Left out: the attempt keeps its end time. */
+  @IsOptional()
   @IsInt()
   @Min(1)
   @Max(600)
-  minutes!: number;
+  minutes?: number;
 }
 
 // ---------------- Re-check ----------------

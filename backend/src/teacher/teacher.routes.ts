@@ -80,9 +80,23 @@ teacherRouter.put('/attempts/:id/items/:questionId', body(RecheckDto), async (re
   res.json(await reports.recheckItem(intParam(req.params.id), intParam(req.params.questionId, 'questionId'), req.body.correct));
 });
 
-/** Let a student revise a submitted attempt: { minutes }. */
+/** Let a student revise a submitted attempt: { minutes } from now, or {} to keep its end time. */
 teacherRouter.post('/attempts/:id/reopen', body(ReopenAttemptDto), async (req, res) => {
-  res.json(await reports.reopenAttempt(intParam(req.params.id), req.body.minutes));
+  res.json(await reports.reopenAttempt(intParam(req.params.id), req.body.minutes ?? null));
+});
+
+/** Pending requests from students whose exam was submitted for leaving it. */
+teacherRouter.get('/reopen-requests', async (_req, res) => {
+  res.json(await reports.listReopenRequests());
+});
+
+/** Reopens the attempt with its end time unchanged. */
+teacherRouter.post('/reopen-requests/:id/approve', async (req, res) => {
+  res.json(await reports.approveReopenRequest(intParam(req.params.id)));
+});
+
+teacherRouter.post('/reopen-requests/:id/decline', async (req, res) => {
+  res.json(await reports.declineReopenRequest(intParam(req.params.id)));
 });
 
 teacherRouter.delete('/attempts/:id', async (req, res) => {

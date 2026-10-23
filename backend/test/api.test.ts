@@ -1362,3 +1362,279 @@ describe('who is online', () => {
     expect((await request(app).get('/api/teacher/online').set(auth(tokens[0]))).status).toBe(403);
   });
 });
+
+describe('a student locked out for leaving the exam can ask the teacher to reopen it', () => {
+  // Locked out and asks; submits normally; runs out of time while locked out.
+  const SR = ['23-40001', '23-40002', '23-40003'];
+  const tokens: string[] = [];
+  const attempts: number[] = [];
+  const TIME_LIMIT = 30;
+  type RequestState = {
+    attemptStatus: string;
+    lockedOut: boolean;
+    canRequest: boolean;
+    deadline: string;
+    request: { id: number; status: string; message: string | null } | null;
+  };
+  const leave = (i: number) =>
+    request(app).post(`/api/attempts/${attempts[i]}/events`).set(auth(tokens[i])).send({ events: [{ type: 'left_page' }] });
+  const ask = (i: number, body: Record<string, unknown> = {}) =>
+    request(app).post(`/api/attempts/${attempts[i]}/reopen-request`).set(auth(tokens[i])).send(body);
+  const state = async (i: number): Promise<RequestState> => {
+    const res = await request(app).get(`/api/attempts/${attempts[i]}/reopen-request`).set(auth(tokens[i]));
+    expect(res.status).toBe(200);
+    return res.body;
+  };
+  const pending = async () => {
+    const res = await request(app).get('/api/teacher/reopen-requests').set(auth(teacherToken));
+    expect(res.status).toBe(200);
+    return res.body.items as { id: number; attemptId: number; message: string | null; student: { srCode: string }; quiz: { title: string } }[];
+  };
+  /** The end time the attempt had from the start: started_at + time limit (the due time is later). */
+  const originalEnd = async (i: number) => {
+    const a = await prisma.attempt.findUniqueOrThrow({ where: { id: attempts[i] } });
+    return a.startedAt.getTime() + TIME_LIMIT * 60_000;
+  };
+
+  beforeAll(async () => {
+    const hash = await hashPassword(PW);
+    for (const [i, srCode] of SR.entries()) {
+      const s = await prisma.user.create({ data: { role: 'student', srCode, name: `Locked ${i + 1}`, sectionId: sectionB, passwordHash: hash } });
+      await prisma.studentSubject.create({ data: { studentId: s.id, subjectId, sectionId: sectionB } });
+      tokens.push(await studentToken(srCode));
+    }
+    const imp = await request(app)
+      .post('/api/teacher/quizzes/import')
+      .set(auth(teacherToken))
+      .send({
+        data: {
+          subject: 'Database Design',
+          title: 'Reopen request test',
+          timeLimitMinutes: TIME_LIMIT,
+          secureMode: true,
+          maxViolations: 1,
+          questions: [{ type: 'identification', text: 'Keyword to add rows?', acceptedAnswers: ['INSERT'] }],
+        },
+      });
+    const asg = await request(app)
+      .put(`/api/teacher/quizzes/${imp.body.created[0].id}/assignments`)
+      .set(auth(teacherToken))
+      .send({ items: [{ sectionId: sectionB, startAt: await dbIso(-5), dueAt: await dbIso(120) }] });
+    const assignmentId = asg.body.sections.find((s: { sectionId: number }) => s.sectionId === sectionB).assignment.id;
+    for (const t of tokens) {
+      const start = await request(app).post('/api/attempts/start').set(auth(t)).send({ assignmentId });
+      expect(start.status).toBe(201);
+      attempts.push(start.body.id);
+    }
+  });
+
+  it('only a student whose exam was submitted for leaving it can ask', async () => {
+    const early = await ask(0);
+    expect(early.status).toBe(409);
+    expect(early.body.code).toBe('NOT_LOCKED_OUT');
+
+    await request(app).post(`/api/attempts/${attempts[1]}/submit`).set(auth(tokens[1])).expect(200);
+    const normal = await ask(1);
+    expect(normal.status).toBe(409);
+    expect(normal.body.code).toBe('NOT_LOCKED_OUT');
+    expect(await state(1)).toMatchObject({ attemptStatus: 'submitted', lockedOut: false, canRequest: false, request: null });
+
+    // Someone else's attempt looks like it does not exist.
+    expect((await request(app).post(`/api/attempts/${attempts[0]}/reopen-request`).set(auth(tokens[1])).send({})).status).toBe(404);
+    expect((await request(app).get(`/api/attempts/${attempts[0]}/reopen-request`).set(auth(tokens[1]))).status).toBe(404);
+  });
+
+  it('a locked-out student sends one request, and leaving the page while locked out is not recorded', async () => {
+    expect((await leave(0)).body).toMatchObject({ status: 'submitted', autoSubmitted: true });
+    expect(await state(0)).toMatchObject({ attemptStatus: 'submitted', lockedOut: true, canRequest: true, request: null });
+
+    // Away to message the teacher on another app: nothing is stored.
+    const events = await prisma.attemptEvent.count({ where: { attemptId: attempts[0] } });
+    await leave(0);
+    await leave(0);
+    expect(await prisma.attemptEvent.count({ where: { attemptId: attempts[0] } })).toBe(events);
+
+    expect((await ask(0, { message: 'x'.repeat(501) })).status).toBe(400);
+    const sent = await ask(0, { message: 'My Messenger popped up, sorry' });
+    expect(sent.status).toBe(201);
+    expect(sent.body).toMatchObject({ canRequest: false, request: { status: 'pending', message: 'My Messenger popped up, sorry' } });
+
+    // A second click returns the same request instead of adding another.
+    const again = await ask(0, { message: 'hello?' });
+    expect(again.status).toBe(200);
+    expect(again.body.request.id).toBe(sent.body.request.id);
+    expect(await prisma.reopenRequest.count({ where: { attemptId: attempts[0] } })).toBe(1);
+  });
+
+  it('the teacher sees the request, and approving it keeps the original end time', async () => {
+    const list = await pending();
+    const mine = list.filter((r) => r.attemptId === attempts[0]);
+    expect(mine).toHaveLength(1);
+    expect(mine[0]).toMatchObject({ message: 'My Messenger popped up, sorry', student: { srCode: SR[0] }, quiz: { title: 'Reopen request test' } });
+    expect((await request(app).get('/api/teacher/reopen-requests').set(auth(tokens[0]))).status).toBe(403);
+    expect((await request(app).post(`/api/teacher/reopen-requests/${mine[0].id}/approve`).set(auth(tokens[0]))).status).toBe(403);
+    const detail = (await request(app).get(`/api/teacher/attempts/${attempts[0]}`).set(auth(teacherToken))).body;
+    expect(detail.reopenRequest).toMatchObject({ id: mine[0].id, message: 'My Messenger popped up, sorry' });
+
+    const approved = await request(app).post(`/api/teacher/reopen-requests/${mine[0].id}/approve`).set(auth(teacherToken));
+    expect(approved.status).toBe(200);
+
+    const view = await request(app).get(`/api/attempts/${attempts[0]}`).set(auth(tokens[0]));
+    expect(view.body.status).toBe('in_progress');
+    expect(new Date(view.body.deadline).getTime()).toBe(await originalEnd(0)); // no time added, none taken away
+    expect(view.body.security.violations).toBe(0);
+    expect(await state(0)).toMatchObject({ attemptStatus: 'in_progress', lockedOut: false, canRequest: false, request: { status: 'approved' } });
+
+    expect((await pending()).some((r) => r.attemptId === attempts[0])).toBe(false);
+    expect((await request(app).get(`/api/teacher/attempts/${attempts[0]}`).set(auth(teacherToken))).body.reopenRequest).toBeNull();
+    const twice = await request(app).post(`/api/teacher/reopen-requests/${mine[0].id}/approve`).set(auth(teacherToken));
+    expect(twice.status).toBe(409);
+    expect(twice.body.code).toBe('NOT_PENDING');
+  });
+
+  it('after a decline the student cannot ask again for the same lockout', async () => {
+    expect((await leave(0)).body).toMatchObject({ status: 'submitted', autoSubmitted: true });
+    // A new lockout after the reopen: a new request is allowed.
+    const sent = await ask(0);
+    expect(sent.status).toBe(201);
+    expect(sent.body.request.message).toBeNull();
+
+    const declined = await request(app).post(`/api/teacher/reopen-requests/${sent.body.request.id}/decline`).set(auth(teacherToken));
+    expect(declined.status).toBe(200);
+    expect(await state(0)).toMatchObject({ attemptStatus: 'submitted', lockedOut: true, canRequest: false, request: { status: 'declined' } });
+    const again = await ask(0);
+    expect(again.status).toBe(409);
+    expect(again.body.code).toBe('REQUEST_DECLINED');
+    expect((await request(app).post(`/api/teacher/reopen-requests/${sent.body.request.id}/approve`).set(auth(teacherToken))).status).toBe(409);
+  });
+
+  it('the teacher can reopen without adding time, for a student who messaged instead', async () => {
+    const res = await request(app).post(`/api/teacher/attempts/${attempts[0]}/reopen`).set(auth(teacherToken)).send({});
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('in_progress');
+    expect(new Date(res.body.deadline).getTime()).toBe(await originalEnd(0));
+  });
+
+  it('once the end time has passed, approving is refused and the teacher gives minutes instead', async () => {
+    expect((await leave(2)).body).toMatchObject({ status: 'submitted', autoSubmitted: true });
+    const sent = await ask(2);
+    expect(sent.status).toBe(201);
+    await prisma.$executeRaw`UPDATE attempts SET started_at = now() - make_interval(mins => ${TIME_LIMIT + 1}::int) WHERE id = ${attempts[2]}`;
+    expect(await state(2)).toMatchObject({ lockedOut: true, canRequest: false, request: { status: 'pending' } });
+
+    const late = await request(app).post(`/api/teacher/reopen-requests/${sent.body.request.id}/approve`).set(auth(teacherToken));
+    expect(late.status).toBe(409);
+    expect(late.body.code).toBe('TIME_UP');
+    const keep = await request(app).post(`/api/teacher/attempts/${attempts[2]}/reopen`).set(auth(teacherToken)).send({});
+    expect(keep.status).toBe(409);
+    expect(keep.body.code).toBe('TIME_UP');
+    expect((await prisma.attempt.findUniqueOrThrow({ where: { id: attempts[2] } })).status).toBe('submitted');
+
+    // Extra minutes still work, and they settle the pending request.
+    await request(app).post(`/api/teacher/attempts/${attempts[2]}/reopen`).set(auth(teacherToken)).send({ minutes: 10 }).expect(200);
+    expect(await state(2)).toMatchObject({ attemptStatus: 'in_progress', request: { status: 'approved' } });
+    expect((await pending()).some((r) => r.attemptId === attempts[2])).toBe(false);
+
+    // Locked out again after that extra time is over: too late to ask.
+    expect((await leave(2)).body).toMatchObject({ status: 'submitted', autoSubmitted: true });
+    await prisma.$executeRaw`UPDATE attempts SET extended_until = now() - interval '1 minute' WHERE id = ${attempts[2]}`;
+    const tooLate = await ask(2);
+    expect(tooLate.status).toBe(409);
+    expect(tooLate.body.code).toBe('TIME_UP');
+  });
+});
+
+describe('which device a student takes the quiz on', () => {
+  const SR = ['23-61001', '23-61002'];
+  const tokens: string[] = [];
+  const attempts: number[] = [];
+  const LAPTOP = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36';
+  const PHONE = 'Mozilla/5.0 (Linux; Android 13; SM-A546E Build/TP1A.220624.014) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Mobile Safari/537.36';
+  const IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Mobile/15E148 Safari/604.1';
+  const header = (v: Record<string, unknown>) => encodeURIComponent(JSON.stringify(v));
+  const save = (i: number, ua: string, device?: Record<string, unknown>) => {
+    const r = request(app).post(`/api/attempts/${attempts[i]}/save`).set(auth(tokens[i])).set('User-Agent', ua);
+    return (device ? r.set('X-Device', header(device)) : r).send({ answers: [] });
+  };
+  type Device = { deviceType: string; os: string; browser: string; model: string | null; screen: string | null; touch: boolean | null; alsoUsedBy: { srCode: string }[] };
+  const devices = async (i: number): Promise<Device[]> => {
+    const res = await request(app).get(`/api/teacher/attempts/${attempts[i]}`).set(auth(teacherToken));
+    expect(res.status).toBe(200);
+    return res.body.devices;
+  };
+
+  beforeAll(async () => {
+    const hash = await hashPassword(PW);
+    for (const [i, srCode] of SR.entries()) {
+      const s = await prisma.user.create({ data: { role: 'student', srCode, name: `Device ${i + 1}`, sectionId: sectionB, passwordHash: hash } });
+      await prisma.studentSubject.create({ data: { studentId: s.id, subjectId, sectionId: sectionB } });
+      tokens.push(await studentToken(srCode));
+    }
+    const imp = await request(app)
+      .post('/api/teacher/quizzes/import')
+      .set(auth(teacherToken))
+      .send({
+        data: {
+          subject: 'Database Design',
+          title: 'Device test',
+          timeLimitMinutes: 30,
+          questions: [{ type: 'identification', text: 'Keyword to remove rows?', acceptedAnswers: ['DELETE'] }],
+        },
+      });
+    const asg = await request(app)
+      .put(`/api/teacher/quizzes/${imp.body.created[0].id}/assignments`)
+      .set(auth(teacherToken))
+      .send({ items: [{ sectionId: sectionB, startAt: await dbIso(-5), dueAt: await dbIso(120) }] });
+    const assignmentId = asg.body.sections.find((s: { sectionId: number }) => s.sectionId === sectionB).assignment.id;
+    for (const [i, t] of tokens.entries()) {
+      const start = await request(app)
+        .post('/api/attempts/start')
+        .set(auth(t))
+        .set('User-Agent', LAPTOP)
+        .set('X-Device', header({ id: `laptop-${i}`, screen: '1920x1080', touch: false }))
+        .send({ assignmentId });
+      expect(start.status).toBe(201);
+      attempts.push(start.body.id);
+    }
+  });
+
+  it('records the device the attempt started on, and the Windows version once the page knows it', async () => {
+    expect(await devices(0)).toMatchObject([
+      { deviceType: 'computer', os: 'Windows 10/11', browser: 'Chrome 141', screen: '1920x1080', touch: false, alsoUsedBy: [] },
+    ]);
+    const id = 'laptop-0';
+    await save(0, LAPTOP, { id, screen: '1920x1080', touch: false, platformVersion: '15.0.0' }).expect(200);
+    await save(0, LAPTOP, { id, screen: '1920x1080', touch: false }).expect(200); // sent before the hints were read
+    expect(await devices(0)).toMatchObject([{ os: 'Windows 11' }]);
+  });
+
+  it('a switch to a phone mid-quiz shows up as a second device, with its model', async () => {
+    await save(0, PHONE, { id: 'phone-1', screen: '2340x1080', touch: true }).expect(200);
+    await save(0, IPHONE).expect(200); // no X-Device header: told apart by the user agent
+    const list = await devices(0);
+    expect(list).toHaveLength(3);
+    expect(list[1]).toMatchObject({ deviceType: 'phone', os: 'Android 13', browser: 'Chrome 141', model: 'SM-A546E', touch: true });
+    expect(list[2]).toMatchObject({ deviceType: 'phone', os: 'iOS 18.1', browser: 'Safari 18', screen: null });
+
+    const res = await request(app).get('/api/teacher/results').set(auth(teacherToken)).query({ sectionId: sectionB });
+    const rows = res.body as { srCode: string; quiz: string; devices: number }[];
+    expect(rows.find((r) => r.srCode === SR[0] && r.quiz === 'Device test')?.devices).toBe(3);
+    expect(rows.find((r) => r.srCode === SR[1] && r.quiz === 'Device test')?.devices).toBe(1);
+  });
+
+  it('flags two students answering from the same browser', async () => {
+    await save(1, PHONE, { id: 'phone-1', screen: '2340x1080', touch: true }).expect(200);
+    expect((await devices(1))[1].alsoUsedBy).toMatchObject([{ srCode: SR[0] }]);
+    expect((await devices(0))[1].alsoUsedBy).toMatchObject([{ srCode: SR[1] }]);
+    expect((await devices(0))[0].alsoUsedBy).toEqual([]);
+  });
+
+  it('ignores a malformed header, other students, and requests after submitting', async () => {
+    await request(app).post(`/api/attempts/${attempts[1]}/save`).set(auth(tokens[1])).set('X-Device', '%E0{bad').send({ answers: [] }).expect(200);
+    await request(app).post(`/api/attempts/${attempts[1]}/save`).set(auth(tokens[0])).set('User-Agent', IPHONE).send({ answers: [] }).expect(404);
+    expect(await devices(1)).toHaveLength(3); // laptop, shared phone, and the request with no usable X-Device
+    await request(app).post(`/api/attempts/${attempts[1]}/submit`).set(auth(tokens[1])).expect(200);
+    await request(app).get(`/api/attempts/${attempts[1]}`).set(auth(tokens[1])).set('User-Agent', IPHONE).expect(200);
+    expect(await devices(1)).toHaveLength(3);
+  });
+});

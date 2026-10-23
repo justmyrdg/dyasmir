@@ -185,26 +185,28 @@ model Assignment {
 }
 
 model Attempt {
-  id            Int             @id @default(autoincrement())
-  assignmentId  Int             @map("assignment_id")
-  studentId     Int             @map("student_id")
-  startedAt     DateTime        @default(now()) @map("started_at") @db.Timestamptz(6)
+  id             Int             @id @default(autoincrement())
+  assignmentId   Int             @map("assignment_id")
+  studentId      Int             @map("student_id")
+  startedAt      DateTime        @default(now()) @map("started_at") @db.Timestamptz(6)
   // JSON array of question ids, fixed at start.
-  questionOrder Json            @map("question_order") @db.JsonB
+  questionOrder  Json            @map("question_order") @db.JsonB
   // JSON object { "<questionId>": [choiceId, ...] }, fixed at start.
-  choiceOrder   Json            @map("choice_order") @db.JsonB
-  currentIndex  Int             @default(0) @map("current_index")
-  status        String          @default("in_progress") @db.VarChar(12)
-  submittedAt   DateTime?       @map("submitted_at") @db.Timestamptz(6)
-  score         Int?
+  choiceOrder    Json            @map("choice_order") @db.JsonB
+  currentIndex   Int             @default(0) @map("current_index")
+  status         String          @default("in_progress") @db.VarChar(12)
+  submittedAt    DateTime?       @map("submitted_at") @db.Timestamptz(6)
+  score          Int?
   /// Set when the teacher reopens a submitted attempt: the new end time (overrides time limit and due time).
-  extendedUntil DateTime?       @map("extended_until") @db.Timestamptz(6)
+  extendedUntil  DateTime?       @map("extended_until") @db.Timestamptz(6)
   /// When the teacher last reopened it; the leave-the-exam counter only counts events after this.
-  reopenedAt    DateTime?       @map("reopened_at") @db.Timestamptz(6)
-  assignment    Assignment      @relation(fields: [assignmentId], references: [id], onDelete: Restrict)
-  student       User            @relation(fields: [studentId], references: [id], onDelete: Restrict)
-  answers       AttemptAnswer[]
-  events        AttemptEvent[]
+  reopenedAt     DateTime?       @map("reopened_at") @db.Timestamptz(6)
+  assignment     Assignment      @relation(fields: [assignmentId], references: [id], onDelete: Restrict)
+  student        User            @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  answers        AttemptAnswer[]
+  events         AttemptEvent[]
+  reopenRequests ReopenRequest[]
+  devices        AttemptDevice[]
 
   @@unique([assignmentId, studentId])
   @@index([studentId])
@@ -250,4 +252,47 @@ model AttemptEvent {
   @@unique([attemptId, clientId])
   @@index([attemptId, occurredAt])
   @@map("attempt_events")
+}
+
+/// A locked-out student (exam submitted for leaving it too many times) asking the teacher to reopen it.
+/// Approving reopens the attempt with its end time unchanged. One per lockout (created after attempts.reopened_at).
+model ReopenRequest {
+  id         Int       @id @default(autoincrement())
+  attemptId  Int       @map("attempt_id")
+  /// Optional note from the student.
+  message    String?   @db.VarChar(500)
+  /// pending | approved | declined (CHECK constraint in the migration)
+  status     String    @default("pending") @db.VarChar(10)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  resolvedAt DateTime? @map("resolved_at") @db.Timestamptz(6)
+  attempt    Attempt   @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+
+  @@index([attemptId])
+  @@index([status])
+  @@map("reopen_requests")
+}
+
+/// Each browser/device a student used during an attempt (see src/attempts/device.ts). More than one row = they switched devices.
+model AttemptDevice {
+  id          Int      @id @default(autoincrement())
+  attemptId   Int      @map("attempt_id")
+  /// Random id the quiz screen keeps in localStorage ("b:<uuid>"), or "ua:<sha256 of the user agent>" without one.
+  deviceKey   String   @map("device_key") @db.VarChar(80)
+  deviceType  String   @map("device_type") @db.VarChar(10)
+  os          String   @db.VarChar(60)
+  browser     String   @db.VarChar(60)
+  model       String?  @db.VarChar(80)
+  /// Physical pixels, larger side first, e.g. "1920x1080".
+  screen      String?  @db.VarChar(20)
+  touch       Boolean?
+  /// Last IP address seen from this device.
+  ip          String?  @db.VarChar(45)
+  userAgent   String   @map("user_agent") @db.VarChar(500)
+  firstSeenAt DateTime @default(now()) @map("first_seen_at") @db.Timestamptz(6)
+  lastSeenAt  DateTime @default(now()) @map("last_seen_at") @db.Timestamptz(6)
+  attempt     Attempt  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+
+  @@unique([attemptId, deviceKey])
+  @@index([deviceKey])
+  @@map("attempt_devices")
 }

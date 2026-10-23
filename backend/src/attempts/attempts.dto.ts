@@ -75,6 +75,15 @@ export class AttemptEventDto {
   detail?: string;
 }
 
+/** A locked-out student asking the teacher to reopen the exam. */
+export class ReopenRequestDto {
+  /** Optional note to the teacher. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  message?: string;
+}
+
 export class RecordEventsDto {
   @IsArray()
   @ArrayMinSize(1)

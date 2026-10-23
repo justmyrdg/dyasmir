@@ -301,6 +301,26 @@ export interface ResultRow {
   flags: number;
   /** Times the student left the exam (or pressed screenshot/print). */
   violations: number;
+  /** Devices/browsers used during the attempt; more than 1 = switched devices. */
+  devices: number;
+}
+
+/** One device/browser seen during an attempt (from its User-Agent and the X-Device header; can be faked). */
+export interface AttemptDevice {
+  id: number;
+  deviceType: 'phone' | 'tablet' | 'computer';
+  os: string;
+  browser: string;
+  model: string | null;
+  /** Physical pixels, e.g. "1920x1080". */
+  screen: string | null;
+  touch: boolean | null;
+  ip: string | null;
+  userAgent: string;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  /** Other students whose attempt at this quiz came from the same browser. */
+  alsoUsedBy: { attemptId: number; name: string; srCode: string }[];
 }
 
 export interface AttemptDetail {
@@ -321,6 +341,7 @@ export interface AttemptDetail {
   student: { srCode: string; name: string; section: string };
   quiz: { id: number; title: string };
   security: { enabled: boolean; maxViolations: number; violations: number; autoSubmitted: boolean };
+  devices: AttemptDevice[];
   events: { id: number; type: string; counted: boolean; occurredAt: string; durationMs: number | null; detail: string | null }[];
   items: {
     number: number;

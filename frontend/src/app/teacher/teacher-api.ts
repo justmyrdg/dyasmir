@@ -8,6 +8,8 @@ export class TeacherApi {
   private readonly http = inject(HttpClient);
   readonly sections = signal<Section[]>([]);
   readonly subjects = signal<Subject[]>([]);
+  /** Pending reopen requests from locked-out students (shown next to the menu link). */
+  readonly reopenRequestCount = signal(0);
   private metaLoaded: Promise<void> | null = null;
 
   loadMeta(): Promise<void> {

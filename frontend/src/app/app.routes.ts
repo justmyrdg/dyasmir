@@ -27,6 +27,11 @@ export const routes: Routes = [
       { path: '', title: 'Dashboard', loadComponent: () => import('./teacher/teacher-dashboard').then((m) => m.TeacherDashboard) },
       { path: 'students', title: 'Students', loadComponent: () => import('./teacher/students').then((m) => m.StudentsPage) },
       { path: 'online', title: 'Online now', loadComponent: () => import('./teacher/online').then((m) => m.OnlinePage) },
+      {
+        path: 'requests',
+        title: 'Reopen requests',
+        loadComponent: () => import('./teacher/reopen-requests').then((m) => m.ReopenRequestsPage),
+      },
       { path: 'quizzes', title: 'Quizzes', loadComponent: () => import('./teacher/quizzes').then((m) => m.QuizzesPage) },
       { path: 'quizzes/new', title: 'New quiz', data: quizzesCrumb, loadComponent: () => import('./teacher/quiz-editor').then((m) => m.QuizEditor) },
       { path: 'quizzes/:id', title: 'Edit quiz', data: quizzesCrumb, loadComponent: () => import('./teacher/quiz-editor').then((m) => m.QuizEditor) },

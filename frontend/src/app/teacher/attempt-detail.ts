@@ -1,7 +1,8 @@
 import { Component, computed, inject, input, OnInit, signal } from '@angular/core';
 import { errorMessage } from '../core/errors';
 import type { AttemptDetail } from '../core/models';
-import { formatManila, formatManilaTime } from '../core/time';
+import { ServerClock } from '../core/server-clock';
+import { formatDuration, formatManila, formatManilaTime } from '../core/time';
 import { TeacherApi } from './teacher-api';
 
 type Item = AttemptDetail['items'][number];
@@ -39,7 +40,7 @@ type Decision = 'auto' | 'correct' | 'wrong';
         </div>
         <div class="flex flex-col items-end gap-2">
           @if (d.status === 'submitted') {
-            <button class="btn-secondary btn-sm" (click)="reopenOpen.set(!reopenOpen())">Reopen for revision</button>
+            <button class="btn-secondary btn-sm" (click)="toggleReopen()">Reopen for revision</button>
           }
           <button class="btn-danger btn-sm" (click)="reset(d)">Reset attempt</button>
         </div>
@@ -47,11 +48,31 @@ type Decision = 'auto' | 'correct' | 'wrong';
           <div class="w-full text-sm text-indigo-800">
             Reopened by you {{ fmt(d.reopenedAt) }}
             @if (d.status === 'in_progress') {
-              · the student can revise until <strong>{{ fmt(d.extendedUntil) }}</strong>
+              · the student can revise until <strong>{{ fmt(d.deadline) }}</strong>
             }
           </div>
         }
       </div>
+
+      @if (d.reopenRequest; as rq) {
+        <div class="alert-info mb-4">
+          <div>
+            <strong>{{ d.student.name }} asked you to reopen this exam</strong> at {{ time(rq.createdAt) }}, after it was submitted for leaving it.
+            @if (rq.message) {
+              <span class="whitespace-pre-wrap">"{{ rq.message }}"</span>
+            }
+          </div>
+          <div class="mt-2 flex flex-wrap items-center gap-2">
+            <button class="btn-primary btn-sm" [disabled]="busy() || timeLeftMs() <= 0" (click)="answerRequest(rq.id, 'approve')">
+              Reopen with the time left
+            </button>
+            <button class="btn-secondary btn-sm" [disabled]="busy()" (click)="answerRequest(rq.id, 'decline')">Decline</button>
+            @if (timeLeftMs() <= 0) {
+              <span class="text-xs">The end time has passed: use Reopen for revision to give extra minutes.</span>
+            }
+          </div>
+        </div>
+      }
 
       @if (reopenOpen() && d.status === 'submitted') {
         <div class="card mb-4 p-5">
@@ -60,13 +81,40 @@ type Decision = 'auto' | 'correct' | 'wrong';
             {{ d.student.name }} can open the quiz again with the same questions and their saved answers, change them and submit again.
             The score is recalculated on that submit, and the leave-the-exam counter starts from zero (you still see the earlier events below).
           </p>
-          <div class="flex flex-wrap items-center gap-3 text-sm">
-            <label class="flex items-center gap-2">
+          <div class="mb-3 space-y-2 text-sm">
+            <label class="flex flex-wrap items-center gap-2" [class.text-slate-400]="timeLeftMs() <= 0">
+              <input
+                type="radio"
+                name="reopen-mode"
+                class="accent-indigo-600"
+                [checked]="reopenMode() === 'keep'"
+                [disabled]="timeLeftMs() <= 0"
+                (change)="reopenMode.set('keep')"
+              />
+              Keep the end time, {{ fmt(d.deadline) }}
+              @if (timeLeftMs() > 0) {
+                <span class="text-slate-500">({{ timeLeft() }} left, no time added)</span>
+              } @else {
+                <span>(already passed)</span>
+              }
+            </label>
+            <label class="flex flex-wrap items-center gap-2">
+              <input type="radio" name="reopen-mode" class="accent-indigo-600" [checked]="reopenMode() === 'minutes'" (change)="reopenMode.set('minutes')" />
               Give
-              <input type="number" min="1" max="600" class="input w-24" [value]="reopenMinutes()" (input)="reopenMinutes.set(+$any($event.target).value)" />
+              <input
+                type="number"
+                min="1"
+                max="600"
+                class="input w-24"
+                [value]="reopenMinutes()"
+                (focus)="reopenMode.set('minutes')"
+                (input)="reopenMinutes.set(+$any($event.target).value)"
+              />
               minutes from now
             </label>
-            <button class="btn-primary btn-sm" [disabled]="busy() || !(reopenMinutes() >= 1 && reopenMinutes() <= 600)" (click)="reopen(d)">
+          </div>
+          <div class="flex flex-wrap items-center gap-3">
+            <button class="btn-primary btn-sm" [disabled]="busy() || !canReopen()" (click)="reopen(d)">
               {{ busy() ? 'Reopening…' : 'Reopen now' }}
             </button>
             <button class="btn-ghost btn-sm" (click)="reopenOpen.set(false)">Cancel</button>
@@ -183,6 +231,7 @@ type Decision = 'auto' | 'correct' | 'wrong';
 })
 export class AttemptDetailPage implements OnInit {
   private readonly api = inject(TeacherApi);
+  private readonly clock = inject(ServerClock);
   readonly id = input.required<string>();
 
   protected readonly detail = signal<AttemptDetail | null>(null);
@@ -190,10 +239,20 @@ export class AttemptDetailPage implements OnInit {
   protected readonly message = signal('');
   protected readonly saving = signal<number | null>(null);
   protected readonly reopenOpen = signal(false);
+  /** keep = the end time stays (the clock kept running while it was submitted); minutes = now + N. */
+  protected readonly reopenMode = signal<'keep' | 'minutes'>('keep');
   protected readonly reopenMinutes = signal(15);
   protected readonly busy = signal(false);
   protected readonly fmt = formatManila;
   protected readonly time = formatManilaTime;
+  protected readonly timeLeftMs = computed(() => {
+    const d = this.detail();
+    return d ? this.clock.msUntil(d.deadline) : 0;
+  });
+  protected readonly timeLeft = computed(() => formatDuration(this.timeLeftMs()));
+  protected readonly canReopen = computed(() =>
+    this.reopenMode() === 'keep' ? this.timeLeftMs() > 0 : this.reopenMinutes() >= 1 && this.reopenMinutes() <= 600,
+  );
 
   private static readonly LABELS: Record<string, string> = {
     left_page: 'Left the exam',
@@ -229,9 +288,42 @@ export class AttemptDetailPage implements OnInit {
 
   async ngOnInit() {
     try {
-      this.detail.set(await this.api.get<AttemptDetail>(`/api/teacher/attempts/${this.id()}`));
+      this.show(await this.api.get<AttemptDetail>(`/api/teacher/attempts/${this.id()}`));
     } catch (err) {
       this.error.set(errorMessage(err));
+    }
+  }
+
+  private show(d: AttemptDetail) {
+    this.clock.sync(d.serverNow);
+    this.detail.set(d);
+  }
+
+  protected toggleReopen() {
+    this.reopenOpen.set(!this.reopenOpen());
+    this.reopenMode.set(this.timeLeftMs() > 0 ? 'keep' : 'minutes');
+  }
+
+  /** Approve (reopen with the end time unchanged) or decline the student's request. */
+  protected async answerRequest(requestId: number, action: 'approve' | 'decline') {
+    const name = this.detail()!.student.name;
+    this.error.set('');
+    this.message.set('');
+    this.busy.set(true);
+    try {
+      await this.api.post(`/api/teacher/reopen-requests/${requestId}/${action}`, {});
+      const updated = await this.api.get<AttemptDetail>(`/api/teacher/attempts/${this.id()}`);
+      this.show(updated);
+      this.reopenOpen.set(false);
+      this.message.set(
+        action === 'approve'
+          ? `Reopened. ${name} can continue until ${this.fmt(updated.deadline)} (end time unchanged).`
+          : `Declined ${name}'s request. You can still reopen the attempt here.`,
+      );
+    } catch (err) {
+      this.error.set(errorMessage(err));
+    } finally {
+      this.busy.set(false);
     }
   }
 
@@ -260,16 +352,17 @@ export class AttemptDetailPage implements OnInit {
   }
 
   protected async reopen(d: AttemptDetail) {
-    const minutes = Math.floor(this.reopenMinutes());
+    const keep = this.reopenMode() === 'keep';
     this.error.set('');
     this.message.set('');
     this.busy.set(true);
     try {
-      const updated = await this.api.post<AttemptDetail>(`/api/teacher/attempts/${d.id}/reopen`, { minutes });
-      this.detail.set(updated);
+      const body = keep ? {} : { minutes: Math.floor(this.reopenMinutes()) };
+      const updated = await this.api.post<AttemptDetail>(`/api/teacher/attempts/${d.id}/reopen`, body);
+      this.show(updated);
       this.reopenOpen.set(false);
       this.message.set(
-        `Reopened. ${d.student.name} can revise and submit again until ${this.fmt(updated.extendedUntil)} (Continue on their quiz list).`,
+        `Reopened. ${d.student.name} can revise and submit again until ${this.fmt(updated.deadline)}${keep ? ' (end time unchanged)' : ''} (Continue on their quiz list).`,
       );
     } catch (err) {
       this.error.set(errorMessage(err));

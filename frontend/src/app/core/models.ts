@@ -96,6 +96,22 @@ export interface AttemptResult {
   }[];
 }
 
+export type ReopenRequestStatus = 'pending' | 'approved' | 'declined';
+
+/** GET/POST /api/attempts/:id/reopen-request: asking the teacher to reopen an exam submitted for leaving it. */
+export interface ReopenRequestState {
+  attemptStatus: 'in_progress' | 'submitted';
+  /** Submitted by the system for leaving the exam too many times. */
+  lockedOut: boolean;
+  /** One request per lockout, while the end time has not passed. */
+  canRequest: boolean;
+  /** The end time; approving does not move it. */
+  deadline: string;
+  serverNow: string;
+  /** The latest request (it may be from an earlier lockout). */
+  request: { id: number; status: ReopenRequestStatus; message: string | null; createdAt: string; resolvedAt: string | null } | null;
+}
+
 // ---------- Teacher ----------
 
 export interface Student {
@@ -219,6 +235,21 @@ export interface OnlineNow {
   }[];
 }
 
+/** GET /api/teacher/reopen-requests: pending requests from students submitted for leaving the exam. */
+export interface ReopenRequests {
+  serverNow: string;
+  items: {
+    id: number;
+    attemptId: number;
+    message: string | null;
+    createdAt: string;
+    /** Unchanged by approving: the student comes back to whatever time is left. */
+    deadline: string;
+    student: { name: string; srCode: string; section: string };
+    quiz: { id: number; title: string };
+  }[];
+}
+
 export interface Dashboard {
   serverNow: string;
   stats: {
@@ -280,10 +311,13 @@ export interface AttemptDetail {
   startedAt: string;
   submittedAt: string | null;
   deadline: string;
+  serverNow: string;
   currentIndex: number;
   /** Set when the teacher reopened it for revision. */
   reopenedAt: string | null;
   extendedUntil: string | null;
+  /** The student's pending request to reopen it, after being submitted for leaving the exam. */
+  reopenRequest: { id: number; message: string | null; createdAt: string } | null;
   student: { srCode: string; name: string; section: string };
   quiz: { id: number; title: string };
   security: { enabled: boolean; maxViolations: number; violations: number; autoSubmitted: boolean };

@@ -2,12 +2,16 @@ import { HttpClient } from '@angular/common/http';
 import { Component, computed, DestroyRef, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRouteSnapshot, NavigationEnd, Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
-import { filter, interval } from 'rxjs';
+import { filter, interval, timer } from 'rxjs';
 import { APP_NAME } from '../core/app-title';
 import { AuthService } from '../core/auth.service';
+import type { ReopenRequests } from '../core/models';
+import { TeacherApi } from '../teacher/teacher-api';
 
 /** How often student pages say "still here" (the server counts 150 s without one as offline). */
 const PING_MS = 60_000;
+/** How often the teacher's menu refreshes the number of reopen requests waiting. */
+const REOPEN_REQUESTS_MS = 30_000;
 
 interface Crumb {
   label: string;
@@ -82,10 +86,15 @@ interface Crumb {
                   [routerLink]="link.path"
                   routerLinkActive="!font-bold !text-indigo-500 bg-indigo-50"
                   [routerLinkActiveOptions]="{ exact: link.exact }"
-                  class="block rounded-lg px-3 py-1.5 text-sm text-slate-600 hover:text-indigo-500"
+                  class="flex items-center justify-between rounded-lg px-3 py-1.5 text-sm text-slate-600 hover:text-indigo-500"
                   (click)="navOpen.set(false)"
-                  >{{ link.label }}</a
-                >
+                  >{{ link.label }}
+                  @if (link.path === '/teacher/requests' && teacherApi.reopenRequestCount() > 0) {
+                    <span class="badge bg-rose-600 text-white" [attr.aria-label]="teacherApi.reopenRequestCount() + ' waiting'">{{
+                      teacherApi.reopenRequestCount()
+                    }}</span>
+                  }
+                </a>
               </li>
             }
           </ul>
@@ -121,6 +130,7 @@ export class Shell {
   protected readonly auth = inject(AuthService);
   private readonly router = inject(Router);
   private readonly http = inject(HttpClient);
+  protected readonly teacherApi = inject(TeacherApi);
   protected readonly appName = APP_NAME;
   protected readonly navOpen = signal(false);
   protected readonly crumbs = signal<Crumb[]>([]);
@@ -129,6 +139,7 @@ export class Shell {
   protected readonly teacherLinks = [
     { path: '/teacher', label: 'Dashboard', exact: true },
     { path: '/teacher/online', label: 'Online now', exact: false },
+    { path: '/teacher/requests', label: 'Reopen requests', exact: false },
     { path: '/teacher/quizzes', label: 'Quizzes', exact: false },
     { path: '/teacher/results', label: 'Results', exact: false },
     { path: '/teacher/students', label: 'Students', exact: false },
@@ -149,6 +160,16 @@ export class Shell {
       interval(PING_MS)
         .pipe(takeUntilDestroyed(destroyRef))
         .subscribe(() => this.http.post('/api/account/ping', {}).subscribe({ error: () => undefined }));
+    } else {
+      // Locked-out students asking to reopen their exam: their time keeps running, so keep the count current.
+      timer(0, REOPEN_REQUESTS_MS)
+        .pipe(takeUntilDestroyed(destroyRef))
+        .subscribe(() =>
+          this.http.get<ReopenRequests>('/api/teacher/reopen-requests').subscribe({
+            next: (r) => this.teacherApi.reopenRequestCount.set(r.items.length),
+            error: () => undefined,
+          }),
+        );
     }
   }
 
